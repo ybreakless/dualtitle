@@ -1,0 +1,28 @@
+{
+  "metadata": {
+    "primary": "de",
+    "secondary": "en",
+    "description": "Complete Dual-Language Subtitles, Cutscenes, Objectives & Prompts (German Top / English Bottom)"
+  },
+  "ST_Cutscenes": {
+    "DLG_01": "Sieh mal da drüben! Eine Fledermaus! / Look over there! It's a bat!",
+    "DLG_02": "Macht die Spezialausrüstung bereit. / Break out the specialist hardware.",
+    "DLG_03": "Schau, ich habe den Hut und Umhang gefunden! / Look, I found the hat and cape!",
+    "DLG_04": "Wir müssen diese Stadt vor Einbruch der Dunkelheit schützen! / We must protect this city before nightfall!",
+    "DLG_05": "Das ist bloß eine Täuschung des Lichts. / That is merely a trick of the light.",
+    "DLG_06": "Ich liebe einen guten dramatischen Monolog. / I do so love a good dramatic monologue.",
+    "DLG_07": "Der beunruhigte Schrei hallte durch die engen Straßen. / The alarmed cry echoed through the narrow streets.",
+    "DLG_08": "Wir verlegen uns sofort auf die Fertigung. / We're moving to manufacturing immediately."
+  },
+  "ST_Objectives": {
+    "OBJ_01": "Untersuche die Hauptanlage / Investigate the main facility",
+    "OBJ_02": "Ein Treffen mit dem Bürgermeister vereinbaren / Schedule a briefing with the Mayor",
+    "OBJ_03": "Dem Detektiv am Beobachtungsposten ein Signal geben / Signal the Detective at the observation post",
+    "OBJ_04": "Rüste deine Schutzbrille und deinen Umhang aus / Equip your protective goggles and cape"
+  },
+  "ST_UI": {
+    "UI_Prompt_Interact": "Drücke [E] zum Untersuchen / Press [E] to Investigate",
+    "UI_Prompt_Action": "Drücke [LEERTASTE] zum Fortfahren / Press [SPACE] to Continue",
+    "UI_Prompt_ScanMode": "Halte [TAB] für Scannersicht / Hold [TAB] for Scanner Vision"
+  }
+}

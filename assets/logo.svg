@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Dual subtitles for games logo: two overlapping, slightly tilted subtitle bars with a gamepad d-pad and buttons">
+  <title>DualTitle - Dual subtitles for games</title>
+  <defs>
+    <mask id="cut" maskUnits="userSpaceOnUse" x="-100" y="-100" width="712" height="712">
+      <rect x="-100" y="-100" width="712" height="712" fill="#fff"/>
+      <g transform="translate(-12 0) rotate(-4 256 198)">
+        <rect x="96" y="150" width="320" height="96" rx="22" fill="#000" stroke="#000" stroke-width="20" stroke-linejoin="round"/>
+      </g>
+    </mask>
+  </defs>
+  <g transform="translate(0 17)">
+    <!-- Back subtitle: outlined bar, tilted down to the right. Text + game buttons -->
+    <g mask="url(#cut)">
+      <g transform="translate(12 0) rotate(3 256 278)">
+        <rect x="100" y="233" width="312" height="90" rx="20" fill="#fff" stroke="#000" stroke-width="12"/>
+        <rect x="128" y="289" width="104" height="18" rx="9" fill="#000"/>
+        <rect x="244" y="289" width="60" height="18" rx="9" fill="#000"/>
+        <circle cx="350" cy="298" r="10" fill="#000"/>
+        <circle cx="376" cy="298" r="10" fill="#000"/>
+      </g>
+    </g>
+    <!-- Front subtitle: solid bar, tilted up to the right. D-pad + text -->
+    <g transform="translate(-12 0) rotate(-4 256 198)">
+      <rect x="96" y="150" width="320" height="96" rx="22" fill="#000"/>
+      <!-- d-pad -->
+      <rect x="118" y="191" width="44" height="14" rx="4" fill="#fff"/>
+      <rect x="133" y="176" width="14" height="44" rx="4" fill="#fff"/>
+      <!-- subtitle text -->
+      <rect x="184" y="189" width="100" height="18" rx="9" fill="#fff"/>
+      <rect x="296" y="189" width="50" height="18" rx="9" fill="#fff"/>
+      <rect x="358" y="189" width="34" height="18" rx="9" fill="#fff"/>
+    </g>
+  </g>
+</svg>

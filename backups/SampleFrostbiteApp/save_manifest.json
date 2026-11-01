@@ -1,0 +1,20 @@
+{
+  "app_dir": "C:\\Users\\arion\\AppData\\Local\\Temp\\tmp89z9opj4\\SampleFrostbiteApp",
+  "timestamp": 1793528318.5923967,
+  "files": {
+    "C:\\Users\\arion\\AppData\\Local\\Temp\\tmp89z9opj4\\SampleFrostbiteApp\\settings\\PROF_SAVE_profile": {
+      "original_path": "C:\\Users\\arion\\AppData\\Local\\Temp\\tmp89z9opj4\\SampleFrostbiteApp\\settings\\PROF_SAVE_profile",
+      "slot_name": "save_0000_PROF_SAVE_profile",
+      "orig_slot_name": "orig_save_0000_PROF_SAVE_profile",
+      "size": 106,
+      "mtime": 1793528318.5087757
+    },
+    "C:\\Users\\arion\\AppData\\Local\\Temp\\tmp89z9opj4\\SampleFrostbiteApp\\user.cfg": {
+      "original_path": "C:\\Users\\arion\\AppData\\Local\\Temp\\tmp89z9opj4\\SampleFrostbiteApp\\user.cfg",
+      "slot_name": "save_0001_user.cfg",
+      "orig_slot_name": "orig_save_0001_user.cfg",
+      "size": 35,
+      "mtime": 1793528318.522817
+    }
+  }
+}

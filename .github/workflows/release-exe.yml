@@ -1,0 +1,68 @@
+name: Build Native Windows .EXE & Publish GitHub Release
+
+on:
+  push:
+    branches: ["main", "master"]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up MSVC C++17 Developer Command Prompt
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Compile DualTitle_Native.exe with Custom Icon Resource
+        shell: cmd
+        run: |
+          rc /fo src\DualTitle.res src\DualTitle.rc
+          cl /std:c++17 /O2 /EHsc /Fe:DualTitle_Native.exe src\DualTitle.cpp src\DualTitle.res user32.lib gdi32.lib shell32.lib comdlg32.lib
+
+      - name: Run Automated C++17 & Python Verification Suites
+        shell: cmd
+        run: |
+          DualTitle_Native.exe --self-test
+          python universal_dualsub.py --self-test
+
+      - name: Package Portable Release ZIP Archive
+        shell: pwsh
+        run: |
+          $exclude = @(".git", ".github", "DualTitle-Windows-x64.zip")
+          $items = Get-ChildItem -Path . | Where-Object { $exclude -notcontains $_.Name }
+          Compress-Archive -Path $items.FullName -DestinationPath DualTitle-Windows-x64.zip -Force
+          New-Item -ItemType Directory -Force -Path docs\downloads | Out-Null
+          Copy-Item DualTitle.exe docs\downloads\DualTitle.exe -Force
+          Copy-Item RestoreSave.exe docs\downloads\RestoreSave.exe -Force
+          Copy-Item DualTitle_Native.exe docs\downloads\DualTitle_Native.exe -Force
+          Copy-Item DualTitle-Windows-x64.zip docs\downloads\DualTitle-Windows-x64.zip -Force
+
+      - name: Upload Windows .EXE & ZIP Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: DualTitle-Windows-x64
+          path: |
+            DualTitle.exe
+            DualTitle_Native.exe
+            RestoreSave.exe
+            DualTitle-Windows-x64.zip
+
+      - name: Create or Update Official GitHub Release (v4.1.0)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v4.1.0
+          name: "DualTitle v4.1.0 — Universal Anti-Cheat-Safe Edition (Windows x64)"
+          body_path: RELEASE_NOTES_v4.1.0.md
+          draft: false
+          prerelease: false
+          files: |
+            DualTitle.exe
+            DualTitle_Native.exe
+            RestoreSave.exe
+            DualTitle-Windows-x64.zip

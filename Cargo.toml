@@ -1,0 +1,9 @@
+[package]
+name = "dualtitle"
+version = "4.1.0"
+edition = "2021"
+description = "DualTitle — Universal Anti-Cheat-Safe Dual Subtitles, In-Game Speed & Word-Meaning HUD, and Save Restore Controller"
+
+[[bin]]
+name = "DualTitle_Rust"
+path = "src/main.rs"

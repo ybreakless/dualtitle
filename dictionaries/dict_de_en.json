@@ -1,0 +1,229 @@
+{
+  "metadata": {
+    "primary": "de",
+    "secondary": "en",
+    "word_count": 20
+  },
+  "words": {
+    "alarmed": {
+      "word": "alarmed",
+      "lang": "en",
+      "phonetic": "/əˈlɑːmd/",
+      "pos": "adjective",
+      "source": "Oxford / Wiktionary",
+      "definition": "Experiencing a sudden feeling of fear, apprehension, or awareness of danger.",
+      "example": "He was alarmed by the sudden noises coming from the corridor.",
+      "german_translation": "alarmiert, beunruhigt",
+      "notes": "Synonyms: frightened, startled, worried"
+    },
+    "cry": {
+      "word": "cry",
+      "lang": "en",
+      "phonetic": "/kraɪ/",
+      "pos": "noun / verb",
+      "source": "Merriam-Webster / Wiktionary",
+      "definition": "A loud, inarticulate sound made by a person, expressing pain, grief, or alarm.",
+      "example": "The alarmed cry echoed through the narrow streets at night.",
+      "german_translation": "der Schrei (m), rufen / weinen",
+      "notes": "German: der Schrei, die Schreie (pl.)"
+    },
+    "bat": {
+      "word": "bat",
+      "lang": "en",
+      "phonetic": "/bæt/",
+      "pos": "noun",
+      "source": "Oxford / Wiktionary",
+      "definition": "A nocturnal mammal with forelimbs adapted as wings for flight.",
+      "example": "Look over there! It's a bat flying across the sky!",
+      "german_translation": "die Fledermaus (f)",
+      "notes": "German: die Fledermaus, die Fledermäuse (pl.) [Feminin]"
+    },
+    "detective": {
+      "word": "detective",
+      "lang": "en",
+      "phonetic": "/dɪˈtɛktɪv/",
+      "pos": "noun",
+      "source": "Collins / Wiktionary",
+      "definition": "A member of the police force or a private investigator investigating offenses.",
+      "example": "The detective arrived at the observation post.",
+      "german_translation": "der Detektiv (m), der Ermittler (m)",
+      "notes": "German: der Detektiv, die Detektive (pl.) [Maskulin]"
+    },
+    "hardware": {
+      "word": "hardware",
+      "lang": "en",
+      "phonetic": "/ˈhɑːdweə/",
+      "pos": "noun",
+      "source": "Cambridge / Wiktionary",
+      "definition": "Physical equipment, specialized mechanical apparatus, or tactical gear.",
+      "example": "Break out the specialist hardware.",
+      "german_translation": "die Ausrüstung (f), die Hardware (f)",
+      "notes": "German: die Ausrüstung, die Ausrüstungen (pl.) [Feminin]"
+    },
+    "manufacturing": {
+      "word": "manufacturing",
+      "lang": "en",
+      "phonetic": "/ˌmænjʊˈfæktʃərɪŋ/",
+      "pos": "noun",
+      "source": "American Heritage / Wiktionary",
+      "definition": "The industrial process of producing goods or machinery on a large scale.",
+      "example": "We're moving to manufacturing immediately.",
+      "german_translation": "die Herstellung (f), die Fertigung (f)",
+      "notes": "German: die Herstellung, die Herstellungen (pl.) [Feminin]"
+    },
+    "monologue": {
+      "word": "monologue",
+      "lang": "en",
+      "phonetic": "/ˈmɒnəlɒɡ/",
+      "pos": "noun",
+      "source": "Oxford / Wiktionary",
+      "definition": "A lengthy speech presented by a single character in a drama or dialogue.",
+      "example": "The speaker delivered a dramatic monologue on stage.",
+      "german_translation": "der Monolog (m)",
+      "notes": "German: der Monolog, die Monologe (pl.) [Maskulin]"
+    },
+    "mayor": {
+      "word": "mayor",
+      "lang": "en",
+      "phonetic": "/mɛər/",
+      "pos": "noun",
+      "source": "Collins / Wiktionary",
+      "definition": "The elected head of an administrative city or municipality.",
+      "example": "Schedule a briefing with the Mayor this afternoon.",
+      "german_translation": "der Bürgermeister (m)",
+      "notes": "German: der Bürgermeister, die Bürgermeister (pl.) [Maskulin]"
+    },
+    "cape": {
+      "word": "cape",
+      "lang": "en",
+      "phonetic": "/keɪp/",
+      "pos": "noun",
+      "source": "Cambridge / Wiktionary",
+      "definition": "A sleeveless cloak hanging loosely from the shoulders.",
+      "example": "He wore a heavy weatherproof cape in the storm.",
+      "german_translation": "der Umhang (m), das Cape (n)",
+      "notes": "German: der Umhang, die Umhänge (pl.) [Maskulin]"
+    },
+    "goggles": {
+      "word": "goggles",
+      "lang": "en",
+      "phonetic": "/ˈɡɒɡlz/",
+      "pos": "noun (plural)",
+      "source": "Oxford / Wiktionary",
+      "definition": "Protective eyewear with surrounding shields against dust, impact, and glare.",
+      "example": "Put on your protective goggles before entering the lab.",
+      "german_translation": "die Schutzbrille (f)",
+      "notes": "German: die Schutzbrille, die Schutzbrillen (pl.) [Feminin]"
+    },
+    "hat": {
+      "word": "hat",
+      "lang": "en",
+      "phonetic": "/hæt/",
+      "pos": "noun",
+      "source": "Oxford / Wiktionary",
+      "definition": "A shaped headwear worn for warmth, protection, or formal style.",
+      "example": "Look, I found the hat near the entrance!",
+      "german_translation": "der Hut (m)",
+      "notes": "German: der Hut, die Hüte (pl.) [Maskulin]"
+    },
+    "city": {
+      "word": "city",
+      "lang": "en",
+      "phonetic": "/ˈsɪti/",
+      "pos": "noun",
+      "source": "WordNet / Wiktionary",
+      "definition": "A large human municipality and urban center.",
+      "example": "We have to protect this city before nightfall!",
+      "german_translation": "die Stadt (f)",
+      "notes": "German: die Stadt, die Städte (pl.) [Feminin]"
+    },
+    "trick": {
+      "word": "trick",
+      "lang": "en",
+      "phonetic": "/trɪk/",
+      "pos": "noun / verb",
+      "source": "Wiktionary",
+      "definition": "An optical illusion, deception, or skilled act of craft.",
+      "example": "That is merely a trick of the light.",
+      "german_translation": "die Täuschung (f), der Trick (m)",
+      "notes": "German: der Trick, die Tricks (pl.) [Maskulin]"
+    },
+    "light": {
+      "word": "light",
+      "lang": "en",
+      "phonetic": "/laɪt/",
+      "pos": "noun / adjective",
+      "source": "WordNet",
+      "definition": "Electromagnetic radiation perceptible to the human eye; illumination.",
+      "example": "The searchlight cut through the dense fog.",
+      "german_translation": "das Licht (n)",
+      "notes": "German: das Licht, die Lichter (pl.) [Neutrum]"
+    },
+    "fledermaus": {
+      "word": "die Fledermaus",
+      "lang": "de",
+      "gender": "Feminin (die)",
+      "pos": "Substantiv, feminin",
+      "source": "Duden / Wiktionary",
+      "definition": "Kleines nachtaktives Säugetier mit zu Flügeln umgebildeten Vordergliedmaßen.",
+      "example": "Sieh mal da drüben! Es ist eine Fledermaus!",
+      "english_translation": "bat",
+      "notes": "Plural: die Fledermäuse"
+    },
+    "umhang": {
+      "word": "der Umhang",
+      "lang": "de",
+      "gender": "Maskulin (der)",
+      "pos": "Substantiv, maskulin",
+      "source": "Duden / Wiktionary",
+      "definition": "Ärmelloses Kleidungsstück, das locker um Schultern und Rücken gelegt wird.",
+      "example": "Der dunkle Umhang wehte im Wind.",
+      "english_translation": "cape, cloak",
+      "notes": "Plural: die Umhänge"
+    },
+    "schutzbrille": {
+      "word": "die Schutzbrille",
+      "lang": "de",
+      "gender": "Feminin (die)",
+      "pos": "Substantiv, feminin",
+      "source": "Duden / Wiktionary",
+      "definition": "Brille, die die Augen vor Staub, Splittern oder grellem Licht schützt.",
+      "example": "Setz deine Schutzbrille auf, bevor wir anfangen.",
+      "english_translation": "safety goggles",
+      "notes": "Plural: die Schutzbrillen"
+    },
+    "hut": {
+      "word": "der Hut",
+      "lang": "de",
+      "gender": "Maskulin (der)",
+      "pos": "Substantiv, maskulin",
+      "source": "Duden / Wiktionary",
+      "definition": "Feste Kopfbedeckung mit Krempe.",
+      "example": "Ich habe deinen Hut gefunden!",
+      "english_translation": "hat",
+      "notes": "Plural: die Hüte"
+    },
+    "stadt": {
+      "word": "die Stadt",
+      "lang": "de",
+      "gender": "Feminin (die)",
+      "pos": "Substantiv, feminin",
+      "source": "Duden / Wiktionary",
+      "definition": "Größere, geschlossene Siedlung mit eigener Verwaltung.",
+      "example": "Diese Stadt braucht unsere Hilfe.",
+      "english_translation": "city, town",
+      "notes": "Plural: die Städte"
+    },
+    "schrei": {
+      "word": "der Schrei",
+      "lang": "de",
+      "gender": "Maskulin (der)",
+      "pos": "Substantiv, maskulin",
+      "source": "Duden / Wiktionary",
+      "definition": "Lauter, unartikulierter Laut, meist Ausdruck von Schmerz oder Furcht.",
+      "example": "Ein gellender Schrei zerriss die Stille.",
+      "english_translation": "cry, shout, scream",
+      "notes": "Plural: die Schreie"
+    }
+  }
+}

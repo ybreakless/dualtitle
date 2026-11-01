@@ -1,0 +1,9 @@
+{
+  "game_dir": "",
+  "audio_lang": "en",
+  "primary_sub_lang": "en",
+  "secondary_sub_lang": "de",
+  "static_mode": true,
+  "run_on_startup": false,
+  "startup_mode": "config_sync_only"
+}
