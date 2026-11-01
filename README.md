@@ -1,8 +1,8 @@
-# DualTitle (C++17 & Rust Anti-Cheat-Safe Universal Edition v4.1)
+# DualTitle v5.0.0 "Aurora" (C++17 & Rust Anti-Cheat-Safe Universal Edition)
 
 <div align="center">
   <img src="assets/logo.png" alt="DualTitle Logo" width="120" />
-  <p><strong>Dual-Subtitle Overlay HUD • Game Library Picker • Save Restoration</strong></p>
+  <p><strong>Modern-Minimal Dual-Subtitle Overlay HUD • Game Library Picker • Save Restoration</strong></p>
   <p>
     <a href="https://github.com/ybreakless/dualtitle/releases/download/v4.1.0/DualTitle.exe">⬇️ Download DualTitle.exe</a> •
     <a href="https://github.com/ybreakless/dualtitle/releases/download/v4.1.0/RestoreSave.exe">💾 RestoreSave.exe</a> •
@@ -19,14 +19,23 @@
 
 > All of your games start **natively and cleanly**. DualTitle sits *outside* the game process — it never touches game memory, never injects DLLs, and never hooks graphics pipelines.
 
+### 🆕 v5 "Aurora" — Modern Minimal Redesign
+
+- 🎨 **New dark design system** (`src/DualTitleTheme.hpp`): charcoal cards, sky-blue + gold accents, rounded corners, GDI+ anti-aliasing.
+- 🔍 **Per-Monitor V2 DPI awareness** — crisp on any scaled display (Segoe UI Variable with graceful fallback).
+- 🖱️ **Region-drawn buttons with hover + pressed states** — no more clunky default controls.
+- ⚡ **Non-blocking game library scan** — runs on a background thread; the UI never freezes.
+- 📋 **Version metadata + embedded manifest** in the exe (proper details view everywhere).
+- 🎯 Same 100% anti-cheat-safe architecture as before — zero injection, zero hooks.
+
 ### 🧱 Technology Stack
 
 | Layer | Technology |
 | :--- | :--- |
-| Native GUI / Overlay | C++17 + Win32 (`src/DualTitle.cpp`, `src/DualTitleEngine.hpp`, `src/DualTitleOverlay.hpp`) |
+| Native GUI / Overlay | C++17 + Win32 (`src/DualTitle.cpp`, `src/DualTitleEngine.hpp`, `src/DualTitleOverlay.hpp`, `src/DualTitleTheme.hpp`) |
 | Fallback / Tray tools | Rust (`src/main.rs`, built with `cargo`) |
 | Subtitle engines | Python 3 (`universal_dualsub.py` + engine modules) |
-| Build system | `build_cpp.bat` (MSVC), `CMakeLists.txt`, `Cargo.toml` |
+| Build system | `build_cpp.bat` (MSVC auto-located via vswhere), `CMakeLists.txt`, `Cargo.toml` |
 
 ---
 
@@ -47,13 +56,14 @@ Prefer portable copies? All three files are also mirrored in [`docs/downloads/`]
 ## 🚀 Quick Start (3 Steps)
 
 1. **Launch the Control Panel**
-   Double-click `DualTitle.exe` (or `DualTitle.bat`). DualTitle scans every drive (`C:`–`Z:`) and lists installed games automatically.
+   Double-click `DualTitle.exe` (or `DualTitle.bat`). DualTitle scans every drive (`C:`–`Z:`) in the background and lists installed games automatically — no lag.
+   💡 Run `install_dualtitle.bat` once to copy the suite to `%LocalAppData%\Programs\DualTitle` and register a Start-Menu + Desktop shortcut — then `DualTitle` is searchable from the Windows Start Menu.
 
 2. **Pick a Game + Subtitle Style**
    Choose your game from the dropdown, then pick your **Spoken Audio**, **Primary (top) subtitle**, **Secondary (bottom) subtitle**, and **subtitle speed**.
 
 3. **Launch & Enjoy**
-   Click **🚀 Launch Selected Game + In-Game Overlay HUD** — you get live dual subtitles, a clickable word dictionary, and save protection while you play.
+   Click **Launch Game + Overlay HUD** — you get live dual subtitles, a clickable word dictionary, and save protection while you play.
 
 > 💡 No install needed. Everything runs from the folder you downloaded.
 
@@ -68,11 +78,17 @@ Prefer portable copies? All three files are also mirrored in [`docs/downloads/`]
 - ❌ **Never opens intrusive process handles** (`OpenProcess`).
 - ✅ **Crafts clean game launches** — stale synthetic `.utoc` / `.ucas` / `.pak` or injected mod files are cleaned up automatically before launch, so games open natively without triggering anti-cheat or file-integrity checks.
 
+### 🖥️ Modern Minimal "Aurora" Control Panel
+
+- Dark charcoal design system with card-grouped sections: **Game Library → Languages & Playback → Actions**.
+- Auto-detected games populate a dark-styled dropdown while the scan runs in the background.
+- One prominent **Launch Game + Overlay HUD** action; Backup / Restore / Repair / Apply as quiet secondary buttons with live status feedback.
+
 ### 🎮 Choose Any Game You Own & Launch Directly
 
 - Double-click `DualTitle.bat` (or `build_cpp.bat`) to open the **DualTitle Control Panel GUI**.
 - Auto-scans all drives (`C:` through `Z:`) across Steam, EA App / Origin, Epic Games, Ubisoft Connect, GOG, and custom folders.
-- Pick any game from the dropdown and click **🚀 Launch Selected Game + In-Game Overlay HUD**.
+- Pick any game from the dropdown and click **Launch Game + Overlay HUD**.
 
 ### 💬 Interactive In-Game Dual-Subtitle Overlay HUD
 
@@ -141,14 +157,15 @@ This runs the full automated verification suite:
 
 ```text
 dualtitle/
-├── DualTitle.exe               # Main launcher (Windows x64)
+├── DualTitle.exe               # Main launcher (Windows x64, v5.0.0 metadata)
 ├── RestoreSave.exe             # 1-click save & profile recovery
 ├── DualTitle.bat               # GUI launcher shortcut
 ├── RESTORE_SAVE.bat            # Standalone restore shortcut
 ├── EMERGENCY_REPAIR.bat        # Post-restore / integrity repair
-├── build_cpp.bat               # Compile the native C++17 GUI with MSVC
+├── build_cpp.bat               # Compile the native C++17 GUI (auto-locates MSVC)
+├── install_dualtitle.bat       # Install to LocalAppData + Start-Menu shortcuts (searchable)
 ├── PUBLISH_TO_GITHUB.bat       # Repo bootstrap helper
-├── RELEASE_NOTES_v4.1.0.md     # Official release notes
+├── RELEASE_NOTES_v4.1.0.md     # Historical release notes (v4.1.0)
 │
 ├── docs/                       # GitHub Pages website (+ downloads mirror)
 │   ├── index.html
@@ -160,10 +177,12 @@ dualtitle/
 ├── assets/                     # Branding (logo.svg, logo.png, dualtitle.ico)
 │
 ├── src/                        # C++17 & Rust source
-│   ├── DualTitle.cpp           # Win32 GUI + game picker
+│   ├── DualTitle.cpp           # Win32 "Aurora" GUI + game picker
 │   ├── DualTitleEngine.hpp     # Engine internals
+│   ├── DualTitleTheme.hpp      # "Aurora" modern-minimal design system
 │   ├── DualTitleOverlay.hpp    # Topmost overlay HUD (Win32)
-│   ├── DualTitle.rc            # Icon + version resources
+│   ├── DualTitle.rc            # Icon + version + manifest resources
+│   ├── app.manifest            # PerMonitorV2 DPI manifest
 │   └── main.rs                 # Rust entry point
 │
 ├── universal_dualsub.py        # Main engine + verification suite
@@ -189,9 +208,12 @@ The pre-built launchers (`DualTitle.exe`, `RestoreSave.exe`) are included, but y
 
 | Target | How |
 | :--- | :--- |
-| Native C++17 GUI + overlay | Double-click `build_cpp.bat` (uses MSVC), or `cmake -S . -B build && cmake --build build` |
+| Native C++17 GUI + overlay | Double-click `build_cpp.bat` — auto-locates VS 2022 via `vswhere`, compiles `DualTitle.exe` and runs the self-test suite |
+| Manual MSVC | `rc /nologo /fo src\DualTitle.res src\DualTitle.rc` then `cl /std:c++17 /O2 /EHsc /utf-8 /Fe:DualTitle.exe src\DualTitle.cpp src\DualTitle.res` |
+| CMake | `cmake -S . -B build && cmake --build build --config Release` |
 | Rust entry point | `cargo build --release` |
 | Run verification suite | `python universal_dualsub.py --self-test` |
+| Install & make searchable | Run `install_dualtitle.bat` (Start-Menu + Desktop shortcut, typeable in Windows search) |
 
 ---
 
@@ -199,11 +221,10 @@ The pre-built launchers (`DualTitle.exe`, `RestoreSave.exe`) are included, but y
 
 - **Website (GitHub Pages):** <https://ybreakless.github.io/dualtitle/>
 - **Releases / Downloads:** <https://github.com/ybreakless/dualtitle/releases>
-- **v4.1.0 Release:** <https://github.com/ybreakless/dualtitle/releases/tag/v4.1.0>
 - **Issues:** open an issue on this repository
 
 ---
 
 <div align="center">
-  <sub><strong>DualTitle v4.1.0</strong> — Universal Anti-Cheat-Safe Edition (Windows x64)</sub>
+  <sub><strong>DualTitle v5.0.0 "Aurora"</strong> — Universal Anti-Cheat-Safe Edition (Windows x64)</sub>
 </div>

@@ -1,28 +1,30 @@
 /**
- * DualTitle.cpp — Main C++17 Native Application for DualTitle
+ * DualTitle.cpp — Main C++17 Native Application for DualTitle ("Aurora" v5)
  * (Universal Anti-Cheat-Safe Dual-Subtitles, Audio Controller, Save Manager & Live Overlay)
  *
  * Features:
- *   1. [NATIVE WIN32 DARK GUI (`--gui` or default on Windows)]:
- *      Opens the DualTitle Desktop Control Panel featuring the custom DualTitle Gamepad +
- *      Tilted Subtitle Bars Logo (`assets/dualtitle.ico`), Auto-Detected Game Library Picker,
- *      Audio/Primary/Secondary Language Selectors, Speed Selector (`0.50x`–`2.00x`),
- *      1-Click "🚀 Launch Selected Game + In-Game Overlay", and 1-Click "💾 Restore Save"!
+ *   1. [NATIVE WIN32 "AURORA" DARK GUI (`--gui` or default on Windows)]:
+ *      Modern minimal DPI-aware control panel (src/DualTitleTheme.hpp design system):
+ *      rounded cards, flat owner-drawn buttons with hover states, dark-styled combos,
+ *      auto game library scan on a background thread (C:–Z:), 1-Click "Launch Game +
+ *      Overlay HUD", and 1-Click "Restore Save".
  *   2. [100% ANTI-CHEAT SAFE / ZERO INJECTION]:
  *      Never injects DLLs or opens foreign process handles. Cleans any legacy `.utoc`/`.ucas`/
  *      `.pak` or `ue4ss` files before launch so every game opens natively without flags.
  *   3. [IN-GAME INTERACTIVE OVERLAY HUD (`--overlay`)]:
  *      Displays Primary (Top in Gold #FFD700) + Secondary (Bottom in Ice-White #E2E8F0)
  *      subtitles with clickable words for instant Dictionary definitions, `- Spd / + Spd`
- *      speed controls, `⏸ Game (ESC)` pause, `🔲 Borderless`, and `💾 Restore Save`.
+ *      speed controls, `Pause (ESC)`, `Borderless`, and `Restore Save`.
  *   4. [UNIVERSAL SAVE BACKUP & RESTORE (`--restore-save` / `--backup-save`)]:
  *      Automatically protects user save files (`Saved/SaveGames`, `PROF_SAVE*`, `Saves`,
  *      `*.sav`, `*.ini`) and restores them with 1 click.
  */
 
 #include "DualTitleEngine.hpp"
+#include "DualTitleTheme.hpp"
 #include "DualTitleOverlay.hpp"
 #include <cassert>
+#include <thread>
 
 using namespace DualTitle;
 
@@ -161,40 +163,157 @@ static std::vector<DetectedGame> ScanInstalledGames() {
 }
 
 // ============================================================================
-// Native Win32 Dark Control Panel GUI (With Logo, Game Picker & Restore Save)
+// Native Win32 "Aurora" Dark Control Panel (Modern Minimal, DPI-Aware)
 // ============================================================================
 
 #ifdef _WIN32
 #include <commdlg.h>
 #include <shlobj.h>
 
+#include <uxtheme.h>
+#pragma comment(lib, "uxtheme.lib")
+
 class Win32ControlPanelGui {
 public:
+    enum : int {
+        ID_COMBO_GAME = 1001,
+        ID_EDIT_PATH = 1002,
+        ID_COMBO_AUDIO = 1004,
+        ID_COMBO_PRIM = 1005,
+        ID_COMBO_SEC = 1006,
+        ID_COMBO_SPEED = 1007,
+        ID_BTN_LAUNCH_ALL = 1101,
+        ID_BTN_OVERLAY_ONLY = 1102,
+        ID_BTN_APPLY_ONLY = 1103,
+        ID_BTN_RESTORE_SAVE = 1104,
+        ID_BTN_BACKUP_SAVE = 1105,
+        ID_BTN_REPAIR = 1106,
+        ID_BTN_BROWSE = 1107
+    };
+
+    enum Tone { ToneInfo, ToneOk, ToneWarn };
+
+    // ---- UI state -----------------------------------------------------------
     static inline std::vector<DetectedGame> games_list;
+    static inline bool scan_ready = false;
     static inline HWND hComboGame = nullptr;
     static inline HWND hEditPath = nullptr;
     static inline HWND hComboAudio = nullptr;
     static inline HWND hComboPrim = nullptr;
     static inline HWND hComboSec = nullptr;
     static inline HWND hComboSpeed = nullptr;
-    static inline HWND hLblStatus = nullptr;
+    static inline Theme::FontSet fonts;
+    static inline int dpi = 96;
+    static inline std::vector<Theme::FlatBtn> buttons;
+    static inline std::map<int, Theme::BtnState> btn_state;
+    static inline std::wstring status_text =
+        L"Ready — 100% zero-injection anti-cheat-safe mode. Saves are backed up before every launch.";
+    static inline Tone status_tone = ToneInfo;
+    static inline bool mouse_tracking = false;
+    static inline HBRUSH bEditBg = nullptr;
+    static inline HBRUSH bListBg = nullptr;
+    static inline const UINT WM_APP_SCANDONE = WM_APP + 1;
 
-    enum GuiCtrlId {
-        ID_COMBO_GAME = 1001,
-        ID_EDIT_PATH = 1002,
-        ID_BTN_BROWSE = 1003,
-        ID_COMBO_AUDIO = 1004,
-        ID_COMBO_PRIM = 1005,
-        ID_COMBO_SEC = 1006,
-        ID_COMBO_SPEED = 1007,
-        ID_BTN_LAUNCH_ALL = 1008,
-        ID_BTN_OVERLAY_ONLY = 1009,
-        ID_BTN_APPLY_ONLY = 1010,
-        ID_BTN_RESTORE_SAVE = 1011,
-        ID_BTN_BACKUP_SAVE = 1012,
-        ID_BTN_REPAIR = 1013
+    // ---- Layout (logical 96-dpi design grid, scaled on demand) ---------------
+    struct Layout {
+        RECT card1{}, card2{}, card3{};
+        RECT rComboGame{}, rEdit{}, rBrowse{}, rComboAudio{}, rComboSpeed{},
+             rComboPrim{}, rComboSec{}, rLaunch{}, rActions[5]{}, rVersion{};
+        RECT rStatusDot{}, rStatusText{};
+        RECT micro1{}, micro2{}, micro3{}, micro4{}; // field captions in card 2
+        RECT section1{}, section2{}, section3{}, footer{};
     };
 
+    static Layout GetLayout() {
+        auto R = [](int x, int y, int w, int h) -> RECT { RECT r{x, y, x + w, y + h}; return r; };
+        auto s = [&](int v) { return Theme::S(v, dpi == 0 ? 96 : dpi); };
+        Layout L;
+
+        L.card1 = R(s(20), s(88), s(640), s(114));
+        L.card2 = R(s(20), L.card1.bottom + s(14), s(640), s(138));
+        L.card3 = R(s(20), L.card2.bottom + s(14), s(640), s(118));
+
+        // Card 1 — game library
+        L.rComboGame = R(L.card1.left + s(16), L.card1.top + s(36), s(608), s(26));
+        L.rEdit = R(L.card1.left + s(16), L.rComboGame.bottom + s(12), s(496), s(26));
+        L.rBrowse = R(L.rEdit.right + s(8), L.rEdit.top, s(102), s(26));
+
+        // Card 2 — languages & playback (two columns, caption above each field)
+        int colB = L.card2.left + s(320);
+        L.rComboAudio = R(L.card2.left + s(16), L.card2.top + s(42), s(288), s(26));
+        L.rComboSpeed = R(colB, L.card2.top + s(42), s(288), s(26));
+        L.rComboPrim = R(L.card2.left + s(16), L.card2.top + s(96), s(288), s(26));
+        L.rComboSec = R(colB, L.card2.top + s(96), s(288), s(26));
+        L.micro1 = R(L.rComboAudio.left, L.rComboAudio.top - s(18), s(180), s(14));
+        L.micro2 = R(L.rComboSpeed.left, L.micro1.top, s(180), s(14));
+        L.micro3 = R(L.rComboPrim.left, L.rComboPrim.top - s(18), s(220), s(14));
+        L.micro4 = R(L.rComboSec.left, L.micro3.top, s(220), s(14));
+
+        // Card 3 — actions
+        L.rLaunch = R(L.card3.left + s(16), L.card3.top + s(16), s(608), s(46));
+        int row_w = s(608);
+        int gap = s(8);
+        int each = (row_w - 4 * gap) / 5;          // last button absorbs the rounding remainder
+        int last = row_w - 4 * (each + gap);
+        int ax = L.card3.left + s(16);
+        for (int i = 0; i < 5; ++i) {
+            L.rActions[i] = R(ax, L.card3.top + s(76), i == 4 ? last : each, s(30));
+            ax += each + gap;
+        }
+
+        // Status + footer
+        L.rStatusDot = R(s(26), L.card3.bottom + s(24), s(9), s(9));
+        L.rStatusText = R(s(46), L.card3.bottom + s(17), s(560), s(20));
+        L.footer = R(s(20), L.rStatusText.bottom + s(8), s(640), s(14));
+
+        // Header version pill
+        L.rVersion = R(s(680) - s(76), s(26), s(56), s(21));
+
+        L.section1 = R(L.card1.left + s(16), L.card1.top + s(11), s(300), s(16));
+        L.section2 = R(L.card2.left + s(16), L.card2.top + s(8), s(300), s(14));
+        L.section3 = R(L.card3.left + s(16), L.card3.top + s(12), s(300), s(16));
+        return L;
+    }
+
+    /** Rebuilds the region-drawn button list from the current layout. */
+    static void BuildButtons() {
+        Layout L = GetLayout();
+        buttons.clear();
+        buttons.push_back({ID_BTN_BROWSE, L.rBrowse, L"Browse…", Theme::BtnGhost});
+        buttons.push_back({ID_BTN_LAUNCH_ALL, L.rLaunch, L"Launch Game + Overlay HUD", Theme::BtnPrimary});
+        const wchar_t* labels[5] = {
+            L"Overlay Only", L"Apply Config", L"Backup Save", L"Restore Save", L"Repair & Clean"
+        };
+        const int ids[5] = {
+            ID_BTN_OVERLAY_ONLY, ID_BTN_APPLY_ONLY, ID_BTN_BACKUP_SAVE,
+            ID_BTN_RESTORE_SAVE, ID_BTN_REPAIR
+        };
+        for (int i = 0; i < 5; ++i) {
+            buttons.push_back({ids[i], L.rActions[i], labels[i],
+                ids[i] == ID_BTN_RESTORE_SAVE ? Theme::BtnTeal : Theme::BtnGhost});
+        }
+    }
+
+    static Theme::FlatBtn* HitButton(const POINT& pt) {
+        for (auto& b : buttons) {
+            if (PtInRect(&b.rc, pt)) return &b;
+        }
+        return nullptr;
+    }
+
+    static void EnsureTrackMouse(HWND hwnd) {
+        if (mouse_tracking) return;
+        TRACKMOUSEEVENT tme{sizeof(tme), TME_LEAVE, hwnd, 0};
+        if (TrackMouseEvent(&tme)) mouse_tracking = true;
+    }
+
+    static void SetStatus(HWND hwnd, const std::wstring& text, Tone tone) {
+        status_text = text;
+        status_tone = tone;
+        InvalidateRect(hwnd, nullptr, TRUE);
+    }
+
+    // ---- Combo helpers -------------------------------------------------------
     static std::string GetWindowStringUtf8(HWND h) {
         int len = GetWindowTextLengthW(h);
         if (len <= 0) return "";
@@ -222,132 +341,273 @@ public:
         return 1.0;
     }
 
+    /** Owner-draw painting for every combo (closed selection box + list rows). */
+    static void DrawComboBoxItem(const DRAWITEMSTRUCT* dis) {
+        Theme::BootGdiplus();
+        HDC hdc = dis->hDC;
+        RECT rc = dis->rcItem;
+        bool edit_area = (dis->itemState & ODS_COMBOBOXEDIT) != 0;
+
+        // Item text
+        std::wstring txt;
+        UINT item_id = edit_area
+            ? (UINT)SendMessageW(dis->hwndItem, CB_GETCURSEL, 0, 0)
+            : dis->itemID;
+        int len = (int)SendMessageW(dis->hwndItem, CB_GETLBTEXTLEN, item_id, 0);
+        if (len > 0) {
+            txt.assign(static_cast<size_t>(len) + 1, L'\0');
+            SendMessageW(dis->hwndItem, CB_GETLBTEXT, item_id, (LPARAM)txt.data());
+            txt.resize(static_cast<size_t>(len));
+        }
+
+        if (edit_area) {
+            // Full dark fill (square) — the parent draws the rounded ring around the field
+            HBRUSH fill = CreateSolidBrush(Theme::Inner);
+            FillRect(hdc, &rc, fill);
+            DeleteObject(fill);
+        } else {
+            bool sel = (dis->itemState & ODS_SELECTED) != 0;
+            HBRUSH fill = CreateSolidBrush(sel ? Theme::ListSel : Theme::Inner);
+            FillRect(hdc, &rc, fill);
+            DeleteObject(fill);
+        }
+
+        if (!txt.empty()) {
+            // While scanning the game combo shows a faint placeholder et al.
+            bool faint = (!scan_ready && dis->hwndItem == hComboGame);
+            COLORREF tx = faint ? Theme::TextFaint
+                        : edit_area ? Theme::TextBody
+                        : (dis->itemState & ODS_SELECTED) ? Theme::Accent : Theme::TextBody;
+            RECT trc{rc.left + Theme::S(10, dpi), rc.top, rc.right, rc.bottom};
+            HFONT old = static_cast<HFONT>(SelectObject(hdc, fonts.body));
+            SetBkMode(hdc, TRANSPARENT);
+            SetTextColor(hdc, tx);
+            DrawTextW(hdc, txt.c_str(), -1, &trc, DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
+            SelectObject(hdc, old);
+        }
+        // (The chevron lives on the cover static that sits over the combo's native button)
+    }
+
+    // ---- Actions (same engine calls as v4 — zero behavior change) ------------
+    static void RunButton(HWND hwnd, int id) {
+        BuildButtons();
+
+        // Read the path as UTF-16 directly so every code page converts cleanly
+        int plen = GetWindowTextLengthW(hEditPath);
+        std::wstring path_w(static_cast<size_t>(plen) + 1, L'\0');
+        GetWindowTextW(hEditPath, path_w.data(), plen + 1);
+        path_w.resize(static_cast<size_t>(plen));
+        fs::path gdir = path_w.empty() ? fs::path() : fs::path(path_w);
+
+        std::string a_lang = GetComboLangCode(hComboAudio);
+        std::string p_lang = GetComboLangCode(hComboPrim);
+        std::string s_lang = GetComboLangCode(hComboSec);
+        double spd = GetComboSpeedValue(hComboSpeed);
+
+        if (id == ID_BTN_BROWSE) {
+            wchar_t file_buf[MAX_PATH] = {};
+            OPENFILENAMEW ofn = {};
+            ofn.lStructSize = sizeof(ofn);
+            ofn.hwndOwner = hwnd;
+            ofn.lpstrFilter = L"Game Executable (*.exe)\0*.exe\0All Files (*.*)\0*.*\0";
+            ofn.lpstrFile = file_buf;
+            ofn.nMaxFile = MAX_PATH;
+            ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+            if (GetOpenFileNameW(&ofn)) {
+                fs::path picked = fs::path(file_buf).parent_path();
+                SetWindowTextW(hEditPath, picked.wstring().c_str());
+            }
+        } else if (id == ID_BTN_RESTORE_SAVE) {
+            std::ostringstream log_ss;
+            int cnt = SaveBackupManager::RestoreSaves(gdir, log_ss);
+            SetStatus(hwnd, L"Restore complete — " + std::to_wstring(cnt) +
+                      L" save/profile file(s) restored & verified.", cnt > 0 ? ToneOk : ToneInfo);
+            MessageBoxW(hwnd, L"Restore Save complete.", L"DualTitle", MB_OK | MB_ICONINFORMATION);
+        } else if (id == ID_BTN_BACKUP_SAVE) {
+            std::ostringstream log_ss;
+            int cnt = SaveBackupManager::BackupSaves(gdir, log_ss);
+            SetStatus(hwnd, L"Backup complete — " + std::to_wstring(cnt) +
+                      L" save/profile file(s) secured to .dualtitle_save_backup.", ToneOk);
+            MessageBoxW(hwnd, L"Backup Save complete.", L"DualTitle", MB_OK | MB_ICONINFORMATION);
+        } else if (id == ID_BTN_REPAIR) {
+            std::ostringstream log_ss;
+            int fixed_n = EmergencyGameRepair::RepairGameDirectory(gdir, log_ss);
+            SaveBackupManager::RestoreSaves(gdir, log_ss);
+            SetStatus(hwnd, L"Repair complete — " + std::to_wstring(fixed_n) +
+                      L" file(s) cleaned & original saves verified.", ToneOk);
+            MessageBoxW(hwnd, L"Repair & Clean complete.", L"DualTitle", MB_OK | MB_ICONINFORMATION);
+        } else if (id == ID_BTN_APPLY_ONLY) {
+            std::ostringstream log_ss;
+            EmergencyGameRepair::RepairGameDirectory(gdir, log_ss);
+            ConfigPatcher::ApplyGameConfig(gdir, a_lang, p_lang, log_ss);
+            SetStatus(hwnd, L"Safe pre-game audio/subtitle config applied (saves backed up automatically).", ToneOk);
+        } else if (id == ID_BTN_OVERLAY_ONLY) {
+            SetStatus(hwnd, L"Overlay HUD running — return to your game and press ALT+F8 to hide/show.", ToneInfo);
+            ShowWindow(hwnd, SW_MINIMIZE);
+            Win32UniversalOverlay::RunOverlayLoop(gdir, p_lang, s_lang, spd);
+            SetStatus(hwnd, L"Overlay session ended.", ToneInfo);
+        } else if (id == ID_BTN_LAUNCH_ALL) {
+            std::ostringstream log_ss;
+            // 1. Back up saves and clean any foreign files so anti-cheat is 100% happy
+            SaveBackupManager::BackupSaves(gdir, log_ss);
+            EmergencyGameRepair::RepairGameDirectory(gdir, log_ss);
+            ConfigPatcher::ApplyGameConfig(gdir, a_lang, p_lang, log_ss);
+
+            // 2. Launch the game executable cleanly via ShellExecuteW
+            fs::path exe_path = FindMainGameExecutable(gdir);
+            if (!exe_path.empty()) {
+                ShellExecuteW(nullptr, L"open", exe_path.wstring().c_str(), nullptr, gdir.wstring().c_str(), SW_SHOWNORMAL);
+            } else {
+                SetStatus(hwnd, L"No game executable found in that folder — check the path or Browse again.", ToneWarn);
+            }
+            // 3. Minimize control panel and start the Anti-Cheat-Safe In-Game Overlay HUD
+            ShowWindow(hwnd, SW_MINIMIZE);
+            Win32UniversalOverlay::RunOverlayLoop(gdir, p_lang, s_lang, spd);
+            SetStatus(hwnd, L"Overlay session ended.", ToneInfo);
+        }
+    }
+
+    // ---- Window procedure ----------------------------------------------------
     static LRESULT CALLBACK GuiWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
         switch (msg) {
             case WM_CREATE: {
-                HFONT hFontTitle = CreateFontW(20, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
-                    DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-                    DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
-                HFONT hFontUi = CreateFontW(15, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-                    DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-                    DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
-                HFONT hFontBold = CreateFontW(15, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
-                    DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-                    DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+                dpi = Theme::WindowDpi(hwnd);
+                Theme::MakeFontSet(dpi, fonts);
+                bEditBg = CreateSolidBrush(Theme::Inner);
+                bListBg = CreateSolidBrush(Theme::Inner);
 
-                auto add_label = [&](const wchar_t* txt, int x, int y, int w, int h, HFONT f) {
-                    HWND hl = CreateWindowW(L"STATIC", txt, WS_CHILD | WS_VISIBLE, x, y, w, h, hwnd, nullptr, nullptr, nullptr);
-                    SendMessageW(hl, WM_SETFONT, reinterpret_cast<WPARAM>(f), TRUE);
-                    return hl;
+                Layout L = GetLayout();
+                auto make_combo = [&](RECT rc, HMENU id) -> HWND {
+                    HWND h = CreateWindowW(L"COMBOBOX", L"",
+                        WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST |
+                        CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL,
+                        rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top,
+                        hwnd, id, nullptr, nullptr);
+                    SendMessageW(h, WM_SETFONT, reinterpret_cast<WPARAM>(fonts.body), TRUE);
+                    SendMessageW(h, CB_SETITEMHEIGHT, 0, static_cast<LPARAM>(
+                        static_cast<DWORD>(rc.bottom - rc.top)));
+                    SetWindowTheme(h, L"DarkMode_Explorer", nullptr);
+                    // Clip 1px inset — hides the combo's classic light frame lines
+                    HRGN inset = CreateRectRgn(1, 1, rc.right - rc.left - 1, rc.bottom - rc.top - 1);
+                    if (inset) SetWindowRgn(h, inset, TRUE);
+                    return h;
                 };
 
-                add_label(L"DUALTITLE — UNIVERSAL ANTI-CHEAT-SAFE DUAL SUBTITLES", 76, 16, 510, 26, hFontTitle);
-                add_label(L"Choose any game you own • Auto Save Backup & Restore • Clickable Words & Speed HUD", 76, 42, 510, 20, hFontUi);
+                hComboGame = make_combo(L.rComboGame, reinterpret_cast<HMENU>(
+                    static_cast<INT_PTR>(ID_COMBO_GAME)));
 
-                // Top Row: Restore Save & Repair Buttons
-                HWND hBtnRestoreTop = CreateWindowW(L"BUTTON", L"💾 RESTORE SAVE (Restore Saved Progress & Profile)",
-                    WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 20, 76, 305, 34, hwnd, reinterpret_cast<HMENU>(ID_BTN_RESTORE_SAVE), nullptr, nullptr);
-                SendMessageW(hBtnRestoreTop, WM_SETFONT, reinterpret_cast<WPARAM>(hFontBold), TRUE);
+                hEditPath = CreateWindowExW(0, L"EDIT", L"",
+                    WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
+                    L.rEdit.left, L.rEdit.top, L.rEdit.right - L.rEdit.left,
+                    L.rEdit.bottom - L.rEdit.top, hwnd,
+                    reinterpret_cast<HMENU>(static_cast<INT_PTR>(ID_EDIT_PATH)), nullptr, nullptr);
+                SendMessageW(hEditPath, WM_SETFONT, reinterpret_cast<WPARAM>(fonts.body), TRUE);
+                SetWindowTheme(hEditPath, L"DarkMode_Explorer", nullptr);
 
-                HWND hBtnRepairTop = CreateWindowW(L"BUTTON", L"🛠️ 1-CLICK REPAIR & CLEAN FOLDER",
-                    WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 335, 76, 265, 34, hwnd, reinterpret_cast<HMENU>(ID_BTN_REPAIR), nullptr, nullptr);
-                SendMessageW(hBtnRepairTop, WM_SETFONT, reinterpret_cast<WPARAM>(hFontBold), TRUE);
+                hComboAudio = make_combo(L.rComboAudio, reinterpret_cast<HMENU>(
+                    static_cast<INT_PTR>(ID_COMBO_AUDIO)));
+                hComboSpeed = make_combo(L.rComboSpeed, reinterpret_cast<HMENU>(
+                    static_cast<INT_PTR>(ID_COMBO_SPEED)));
+                hComboPrim = make_combo(L.rComboPrim, reinterpret_cast<HMENU>(
+                    static_cast<INT_PTR>(ID_COMBO_PRIM)));
+                hComboSec = make_combo(L.rComboSec, reinterpret_cast<HMENU>(
+                    static_cast<INT_PTR>(ID_COMBO_SEC)));
 
-                // 1. Detected Games Dropdown
-                add_label(L"1. Choose Installed Game / Application (Auto-Scanned Across C: - Z:):", 20, 122, 560, 20, hFontBold);
-                hComboGame = CreateWindowW(L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL,
-                    20, 144, 580, 240, hwnd, reinterpret_cast<HMENU>(ID_COMBO_GAME), nullptr, nullptr);
-                SendMessageW(hComboGame, WM_SETFONT, reinterpret_cast<WPARAM>(hFontUi), TRUE);
+                // Owner-drawn chevron covers over each combo's native (light) drop button
+                auto cover_combo_button = [&](const RECT& field, INT_PTR id) {
+                    RECT br{};
+                    br.left = field.right - Theme::S(21, dpi);
+                    br.top = field.top;
+                    br.right = field.right;
+                    br.bottom = field.bottom;
+                    HWND cov = CreateWindowExW(0, L"STATIC", L"",
+                        WS_CHILD | WS_VISIBLE | SS_OWNERDRAW,
+                        br.left, br.top, br.right - br.left, br.bottom - br.top,
+                        hwnd, reinterpret_cast<HMENU>(id), nullptr, nullptr);
+                    if (cov) {
+                        HRGN rg = CreateRoundRectRgn(0, 0,
+                            br.right - br.left + 1, br.bottom - br.top + 1,
+                            Theme::S(6, dpi), Theme::S(6, dpi));
+                        SetWindowRgn(cov, rg, TRUE);
+                    }
+                    return cov;
+                };
+                cover_combo_button(L.rComboGame, 1301);
+                cover_combo_button(L.rComboAudio, 1302);
+                cover_combo_button(L.rComboSpeed, 1303);
+                cover_combo_button(L.rComboPrim, 1304);
+                cover_combo_button(L.rComboSec, 1305);
 
-                games_list = ScanInstalledGames();
-                for (const auto& g : games_list) {
-                    std::wstring item = Win32UniversalOverlay::Utf8ToWide(g.title + "  (" + g.path.string() + ")");
-                    SendMessageW(hComboGame, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(item.c_str()));
-                }
-                if (!games_list.empty()) SendMessageW(hComboGame, CB_SETCURSEL, 0, 0);
-
-                // Custom Game Folder Path + Browse
-                add_label(L"Active Game Folder Path (or paste any folder / .exe path):", 20, 180, 460, 20, hFontUi);
-                std::wstring init_path = games_list.empty() ? L"" : Win32UniversalOverlay::Utf8ToWide(games_list[0].path.string());
-                hEditPath = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", init_path.c_str(),
-                    WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 20, 202, 470, 26, hwnd, reinterpret_cast<HMENU>(ID_EDIT_PATH), nullptr, nullptr);
-                SendMessageW(hEditPath, WM_SETFONT, reinterpret_cast<WPARAM>(hFontUi), TRUE);
-
-                HWND hBtnBrowse = CreateWindowW(L"BUTTON", L"📂 Browse...",
-                    WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 500, 201, 100, 28, hwnd, reinterpret_cast<HMENU>(ID_BTN_BROWSE), nullptr, nullptr);
-                SendMessageW(hBtnBrowse, WM_SETFONT, reinterpret_cast<WPARAM>(hFontUi), TRUE);
-
-                // Language Selectors
+                // Populate language + speed selectors
                 const auto& langs = GetSupportedLanguages();
-                auto populate_lang_combo = [&](HWND hc, const std::string& def_code) {
+                auto fill_lang = [&](HWND hc, const char* def) {
                     int sel = 0;
                     for (size_t i = 0; i < langs.size(); ++i) {
-                        std::wstring lbl = Win32UniversalOverlay::Utf8ToWide(langs[i].code + " — " + langs[i].display_name);
+                        std::wstring lbl = Win32UniversalOverlay::Utf8ToWide(
+                            langs[i].display_name + "  ·  " + langs[i].code);
                         SendMessageW(hc, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(lbl.c_str()));
-                        if (langs[i].code == def_code) sel = static_cast<int>(i);
+                        if (langs[i].code == def) sel = static_cast<int>(i);
                     }
                     SendMessageW(hc, CB_SETCURSEL, sel, 0);
                 };
+                fill_lang(hComboAudio, "en");
+                fill_lang(hComboPrim, "en");
+                fill_lang(hComboSec, "de");
 
-                add_label(L"2. Spoken Audio Language (Voice Track):", 20, 240, 280, 20, hFontBold);
-                hComboAudio = CreateWindowW(L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL,
-                    20, 262, 280, 220, hwnd, reinterpret_cast<HMENU>(ID_COMBO_AUDIO), nullptr, nullptr);
-                SendMessageW(hComboAudio, WM_SETFONT, reinterpret_cast<WPARAM>(hFontUi), TRUE);
-                populate_lang_combo(hComboAudio, "en");
-
-                add_label(L"3. Default Subtitle Speed (In-Game Control):", 320, 240, 280, 20, hFontBold);
-                hComboSpeed = CreateWindowW(L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST,
-                    320, 262, 280, 180, hwnd, reinterpret_cast<HMENU>(ID_COMBO_SPEED), nullptr, nullptr);
-                SendMessageW(hComboSpeed, WM_SETFONT, reinterpret_cast<WPARAM>(hFontUi), TRUE);
                 const wchar_t* speed_labels[] = {
-                    L"0.50x (Slow Study Speed)",
-                    L"0.75x (Relaxed Reading Speed)",
-                    L"1.00x (Normal Real-Time Speed)",
-                    L"1.25x (Fast Reading Speed)",
-                    L"1.50x (Rapid Speed)",
-                    L"2.00x (Double Speed)"
+                    L"0.50×  ·  Slow Study",
+                    L"0.75×  ·  Relaxed",
+                    L"1.00×  ·  Real-Time",
+                    L"1.25×  ·  Fast",
+                    L"1.50×  ·  Rapid",
+                    L"2.00×  ·  Double"
                 };
-                for (int i = 0; i < 6; ++i) SendMessageW(hComboSpeed, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(speed_labels[i]));
+                for (int i = 0; i < 6; ++i) {
+                    SendMessageW(hComboSpeed, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(speed_labels[i]));
+                }
                 SendMessageW(hComboSpeed, CB_SETCURSEL, 2, 0);
 
-                add_label(L"4. Primary Subtitle Language (Top Line - Gold):", 20, 300, 280, 20, hFontBold);
-                hComboPrim = CreateWindowW(L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL,
-                    20, 322, 280, 220, hwnd, reinterpret_cast<HMENU>(ID_COMBO_PRIM), nullptr, nullptr);
-                SendMessageW(hComboPrim, WM_SETFONT, reinterpret_cast<WPARAM>(hFontUi), TRUE);
-                populate_lang_combo(hComboPrim, "en");
+                // Game combo placeholder until the background scan returns
+                SendMessageW(hComboGame, CB_ADDSTRING, 0,
+                    reinterpret_cast<LPARAM>(L"Scanning installed games (C: – Z:)…"));
+                SendMessageW(hComboGame, CB_SETCURSEL, 0, 0);
 
-                add_label(L"5. Secondary Subtitle Language (Bottom Line - White):", 320, 300, 280, 20, hFontBold);
-                hComboSec = CreateWindowW(L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL,
-                    320, 322, 280, 220, hwnd, reinterpret_cast<HMENU>(ID_COMBO_SEC), nullptr, nullptr);
-                SendMessageW(hComboSec, WM_SETFONT, reinterpret_cast<WPARAM>(hFontUi), TRUE);
-                populate_lang_combo(hComboSec, "de");
+                // Background game library scan — UI never freezes
+                std::thread([hwnd]() {
+                    auto games = ScanInstalledGames();
+                    auto* payload = new std::vector<DetectedGame>(std::move(games));
+                    if (!PostMessageW(hwnd, WM_APP_SCANDONE, 0,
+                                      reinterpret_cast<LPARAM>(payload))) {
+                        delete payload;
+                    }
+                }).detach();
+                return 0;
+            }
 
-                // Main Action Buttons
-                HWND hBtnLaunchAll = CreateWindowW(L"BUTTON",
-                    L"🚀 LAUNCH SELECTED GAME + IN-GAME DUAL-SUBTITLE OVERLAY (100% ANTI-CHEAT SAFE)",
-                    WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 20, 366, 580, 40, hwnd, reinterpret_cast<HMENU>(ID_BTN_LAUNCH_ALL), nullptr, nullptr);
-                SendMessageW(hBtnLaunchAll, WM_SETFONT, reinterpret_cast<WPARAM>(hFontBold), TRUE);
+            case WM_APP_SCANDONE: {
+                auto* payload = reinterpret_cast<std::vector<DetectedGame>*>(lparam);
+                if (!payload) break;
+                SendMessageW(hComboGame, CB_RESETCONTENT, 0, 0);
+                games_list = std::move(*payload);
+                delete payload;
+                scan_ready = true;
 
-                HWND hBtnOverlay = CreateWindowW(L"BUTTON",
-                    L"🎮 Open Interactive In-Game Dual-Subtitle HUD Only (Click Words & Speed Controls)",
-                    WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 20, 414, 580, 34, hwnd, reinterpret_cast<HMENU>(ID_BTN_OVERLAY_ONLY), nullptr, nullptr);
-                SendMessageW(hBtnOverlay, WM_SETFONT, reinterpret_cast<WPARAM>(hFontBold), TRUE);
-
-                HWND hBtnApply = CreateWindowW(L"BUTTON", L"Apply Pre-Game Audio/Subtitle Config",
-                    WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 20, 456, 190, 32, hwnd, reinterpret_cast<HMENU>(ID_BTN_APPLY_ONLY), nullptr, nullptr);
-                SendMessageW(hBtnApply, WM_SETFONT, reinterpret_cast<WPARAM>(hFontUi), TRUE);
-
-                HWND hBtnBackup = CreateWindowW(L"BUTTON", L"📦 Backup Save Now",
-                    WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 220, 456, 180, 32, hwnd, reinterpret_cast<HMENU>(ID_BTN_BACKUP_SAVE), nullptr, nullptr);
-                SendMessageW(hBtnBackup, WM_SETFONT, reinterpret_cast<WPARAM>(hFontUi), TRUE);
-
-                HWND hBtnRestoreBot = CreateWindowW(L"BUTTON", L"💾 Restore Save",
-                    WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 410, 456, 190, 32, hwnd, reinterpret_cast<HMENU>(ID_BTN_RESTORE_SAVE), nullptr, nullptr);
-                SendMessageW(hBtnRestoreBot, WM_SETFONT, reinterpret_cast<WPARAM>(hFontBold), TRUE);
-
-                hLblStatus = add_label(
-                    L"Status: Ready (100% Zero-Injection Anti-Cheat-Safe Mode). Saves are automatically backed up before every launch.",
-                    20, 500, 580, 36, hFontUi);
+                for (const auto& g : games_list) {
+                    std::wstring item = Win32UniversalOverlay::Utf8ToWide(g.title);
+                    SendMessageW(hComboGame, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(item.c_str()));
+                }
+                if (!games_list.empty()) {
+                    SendMessageW(hComboGame, CB_SETCURSEL, 0, 0);
+                    SetWindowTextW(hEditPath, games_list.front().path.wstring().c_str());
+                    SetStatus(hwnd, L"Found " + std::to_wstring(games_list.size()) +
+                        L" installed game(s). Pick one, choose your languages, then launch.", ToneOk);
+                } else {
+                    std::wstring ph = L"No games auto-detected — paste a folder above or Browse…";
+                    SendMessageW(hComboGame, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(ph.c_str()));
+                    SendMessageW(hComboGame, CB_SETCURSEL, 0, 0);
+                    SetStatus(hwnd, L"No games found automatically — paste any game folder path or use Browse…", ToneWarn);
+                }
+                InvalidateRect(hwnd, nullptr, TRUE);
                 return 0;
             }
 
@@ -355,91 +615,227 @@ public:
                 int id = LOWORD(wparam);
                 int code = HIWORD(wparam);
 
-                if (id == ID_COMBO_GAME && code == CBN_SELCHANGE) {
+                if (id == ID_COMBO_GAME && code == CBN_SELCHANGE && scan_ready) {
                     int idx = static_cast<int>(SendMessageW(hComboGame, CB_GETCURSEL, 0, 0));
                     if (idx >= 0 && static_cast<size_t>(idx) < games_list.size()) {
-                        std::wstring pstr = Win32UniversalOverlay::Utf8ToWide(games_list[static_cast<size_t>(idx)].path.string());
-                        SetWindowTextW(hEditPath, pstr.c_str());
+                        SetWindowTextW(hEditPath, games_list[static_cast<size_t>(idx)].path.wstring().c_str());
                     }
                     return 0;
                 }
+                return 0;
+            }
 
-                fs::path gdir = GetWindowStringUtf8(hEditPath);
-                std::string a_lang = GetComboLangCode(hComboAudio);
-                std::string p_lang = GetComboLangCode(hComboPrim);
-                std::string s_lang = GetComboLangCode(hComboSec);
-                double spd = GetComboSpeedValue(hComboSpeed);
+            case WM_DRAWITEM: {
+                auto* dis = reinterpret_cast<DRAWITEMSTRUCT*>(lparam);
+                if (dis->CtlType == ODT_COMBOBOX) {
+                    DrawComboBoxItem(dis);
+                    return TRUE;
+                }
+                if (dis->CtlType == ODT_STATIC) {
+                    // Dark pill + chevron cover over the native combo drop button
+                    Theme::RoundRectFill(dis->hDC, dis->rcItem, Theme::S(6, dpi), Theme::Inner);
+                    int r = Theme::S(7, dpi);
+                    int cx = (dis->rcItem.left + dis->rcItem.right) / 2;
+                    int cy = (dis->rcItem.top + dis->rcItem.bottom) / 2 - 1;
+                    Gdiplus::Graphics g(dis->hDC);
+                    g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+                    COLORREF chev = (dis->CtlID == 1301) ? Theme::Accent : Theme::TextFaint;
+                    Gdiplus::SolidBrush br(Gdiplus::Color(210,
+                        GetRValue(chev), GetGValue(chev), GetBValue(chev)));
+                    Gdiplus::PointF pts[3] = {
+                        Gdiplus::PointF(float(cx - r / 2.0), float(cy - r / 4.0)),
+                        Gdiplus::PointF(float(cx + r / 2.0), float(cy - r / 4.0)),
+                        Gdiplus::PointF(float(cx), float(cy + r / 2.0))
+                    };
+                    g.FillPolygon(&br, pts, 3);
+                    return TRUE;
+                }
+                break;
+            }
 
-                if (id == ID_BTN_BROWSE) {
-                    wchar_t file_buf[MAX_PATH] = {};
-                    OPENFILENAMEW ofn = {};
-                    ofn.lStructSize = sizeof(ofn);
-                    ofn.hwndOwner = hwnd;
-                    ofn.lpstrFilter = L"Game Executable (*.exe)\0*.exe\0All Files (*.*)\0*.*\0";
-                    ofn.lpstrFile = file_buf;
-                    ofn.nMaxFile = MAX_PATH;
-                    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
-                    if (GetOpenFileNameW(&ofn)) {
-                        fs::path picked = fs::path(file_buf).parent_path();
-                        SetWindowTextW(hEditPath, picked.wstring().c_str());
+            case WM_MEASUREITEM: {
+                auto* mis = reinterpret_cast<MEASUREITEMSTRUCT*>(lparam);
+                if (mis->CtlType == ODT_COMBOBOX) {
+                    mis->itemHeight = static_cast<UINT>(Theme::S(26, dpi));
+                    return TRUE;
+                }
+                break;
+            }
+
+            case WM_CTLCOLOREDIT: {
+                HDC hdc = reinterpret_cast<HDC>(wparam);
+                SetTextColor(hdc, Theme::TextBody);
+                SetBkColor(hdc, Theme::Inner);
+                return reinterpret_cast<LRESULT>(bEditBg);
+            }
+            case WM_CTLCOLORSTATIC: {
+                HDC hdc = reinterpret_cast<HDC>(wparam);
+                SetTextColor(hdc, Theme::TextBody);
+                SetBkColor(hdc, Theme::Inner);
+                return reinterpret_cast<LRESULT>(bEditBg);
+            }
+            case WM_CTLCOLORLISTBOX:
+                return reinterpret_cast<LRESULT>(bListBg);
+            case WM_CTLCOLORSCROLLBAR:
+                return reinterpret_cast<LRESULT>(bListBg);
+
+            case WM_MOUSEMOVE: {
+                EnsureTrackMouse(hwnd);
+                POINT pt{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+                BuildButtons();
+                for (auto& b : buttons) {
+                    auto& st = btn_state[b.id];
+                    bool hov = PtInRect(&b.rc, pt) != FALSE;
+                    if (!hov) st.pressed = false;
+                    if (st.hover != hov) {
+                        st.hover = hov;
+                        InvalidateRect(hwnd, &b.rc, TRUE);
                     }
-                } else if (id == ID_BTN_RESTORE_SAVE) {
-                    std::ostringstream log_ss;
-                    int cnt = SaveBackupManager::RestoreSaves(gdir, log_ss);
-                    std::wstring msg = L"Restore Save complete (" + std::to_wstring(cnt) + L" save/profile file(s) restored & verified).";
-                    SetWindowTextW(hLblStatus, msg.c_str());
-                    MessageBoxW(hwnd, msg.c_str(), L"DualTitle — Restore Save", MB_OK | MB_ICONINFORMATION);
-                } else if (id == ID_BTN_BACKUP_SAVE) {
-                    std::ostringstream log_ss;
-                    int cnt = SaveBackupManager::BackupSaves(gdir, log_ss);
-                    std::wstring msg = L"Backed up " + std::to_wstring(cnt) + L" save/profile file(s) to .dualtitle_save_backup.";
-                    SetWindowTextW(hLblStatus, msg.c_str());
-                    MessageBoxW(hwnd, msg.c_str(), L"DualTitle — Backup Save", MB_OK | MB_ICONINFORMATION);
-                } else if (id == ID_BTN_REPAIR) {
-                    std::ostringstream log_ss;
-                    int fixed = EmergencyGameRepair::RepairGameDirectory(gdir, log_ss);
-                    SaveBackupManager::RestoreSaves(gdir, log_ss);
-                    std::wstring msg = L"Cleaned & repaired " + std::to_wstring(fixed) + L" file(s) and verified original saves.";
-                    SetWindowTextW(hLblStatus, msg.c_str());
-                    MessageBoxW(hwnd, msg.c_str(), L"DualTitle — Repair & Clean Complete", MB_OK | MB_ICONINFORMATION);
-                } else if (id == ID_BTN_APPLY_ONLY) {
-                    std::ostringstream log_ss;
-                    EmergencyGameRepair::RepairGameDirectory(gdir, log_ss);
-                    ConfigPatcher::ApplyGameConfig(gdir, a_lang, p_lang, log_ss);
-                    std::wstring msg = L"Applied safe pre-game audio/subtitle settings (Saves backed up automatically).";
-                    SetWindowTextW(hLblStatus, msg.c_str());
-                } else if (id == ID_BTN_OVERLAY_ONLY) {
-                    ShowWindow(hwnd, SW_MINIMIZE);
-                    Win32UniversalOverlay::RunOverlayLoop(gdir, p_lang, s_lang, spd);
-                } else if (id == ID_BTN_LAUNCH_ALL) {
-                    std::ostringstream log_ss;
-                    // 1. Back up saves and clean any foreign files so anti-cheat is 100% happy
-                    SaveBackupManager::BackupSaves(gdir, log_ss);
-                    EmergencyGameRepair::RepairGameDirectory(gdir, log_ss);
-                    ConfigPatcher::ApplyGameConfig(gdir, a_lang, p_lang, log_ss);
-
-                    // 2. Launch the game executable cleanly via ShellExecuteW
-                    fs::path exe_path = FindMainGameExecutable(gdir);
-                    if (!exe_path.empty()) {
-                        ShellExecuteW(nullptr, L"open", exe_path.wstring().c_str(), nullptr, gdir.wstring().c_str(), SW_SHOWNORMAL);
-                    }
-                    // 3. Minimize control panel and start the Anti-Cheat-Safe In-Game Overlay HUD
-                    ShowWindow(hwnd, SW_MINIMIZE);
-                    Win32UniversalOverlay::RunOverlayLoop(gdir, p_lang, s_lang, spd);
                 }
                 return 0;
+            }
+
+            case WM_MOUSELEAVE: {
+                mouse_tracking = false;
+                for (auto& b : buttons) {
+                    auto& st = btn_state[b.id];
+                    if (st.hover || st.pressed) {
+                        st.hover = false;
+                        st.pressed = false;
+                        InvalidateRect(hwnd, &b.rc, TRUE);
+                    }
+                }
+                return 0;
+            }
+
+            case WM_LBUTTONDOWN: {
+                BuildButtons();
+                POINT pt{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+                if (auto* b = HitButton(pt)) {
+                    btn_state[b->id].pressed = true;
+                    SetCapture(hwnd);
+                    InvalidateRect(hwnd, &b->rc, TRUE);
+                }
+                return 0;
+            }
+
+            case WM_LBUTTONUP: {
+                BuildButtons();
+                POINT pt{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+                auto* hit = HitButton(pt);
+                ReleaseCapture();
+                for (auto& b : buttons) {
+                    auto& st = btn_state[b.id];
+                    if (st.pressed) {
+                        st.pressed = false;
+                        InvalidateRect(hwnd, &b.rc, TRUE);
+                        if (hit && hit->id == b.id) {
+                            RunButton(hwnd, b.id);
+                            break; // RunButton may enter the overlay loop
+                        }
+                    }
+                }
+                return 0;
+            }
+
+            case WM_SETCURSOR: {
+                if (LOWORD(lparam) == HTCLIENT) {
+                    POINT pt{};
+                    GetCursorPos(&pt);
+                    ScreenToClient(hwnd, &pt);
+                    BuildButtons();
+                    SetCursor(HitButton(pt)
+                        ? LoadCursor(nullptr, IDC_HAND)
+                        : LoadCursor(nullptr, IDC_ARROW));
+                    return TRUE;
+                }
+                break;
             }
 
             case WM_PAINT: {
                 PAINTSTRUCT ps;
                 HDC hdc = BeginPaint(hwnd, &ps);
-                // Draw DualTitle Gamepad + Subtitle Bars Logo Badge in top-left (x=18, y=14, 48x48)
-                Win32UniversalOverlay::DrawDualTitleMiniLogo(hdc, 20, 16, 44);
+                Theme::BootGdiplus();
+                RECT crc{};
+                GetClientRect(hwnd, &crc);
+                Layout L = GetLayout();
+                BuildButtons();
+                auto s = [&](int v) { return Theme::S(v, dpi); };
+
+                // Window background
+                HBRUSH bg = CreateSolidBrush(Theme::Window);
+                FillRect(hdc, &crc, bg);
+                DeleteObject(bg);
+
+                // --- Header
+                Win32UniversalOverlay::DrawDualTitleMiniLogo(hdc, s(24), s(24), s(44));
+                Theme::DrawLabel(hdc, L"DualTitle", RECT{s(84), s(18), s(320), s(48)}, fonts.title, Theme::TextTitle);
+                Theme::DrawLabel(hdc, L"Universal Dual Subtitles · Anti-Cheat-Safe Overlay · Dictionary · Save Guard",
+                    RECT{s(84), s(48), s(520), s(68)}, fonts.sub, Theme::TextMuted);
+                Theme::RoundRectFill(hdc, L.rVersion, s(10), Theme::GhostFill, 255, Theme::GhostBorder, 220);
+                Theme::DrawLabel(hdc, L"v5.0", L.rVersion, fonts.section, Theme::Accent, 1,
+                                 DT_CENTER | DT_SINGLELINE | DT_VCENTER);
+
+                // --- Card 1: GAME LIBRARY
+                Theme::RoundRectFill(hdc, L.card1, s(10), Theme::Card, 255, Theme::CardBorder, 230);
+                Theme::DrawLabel(hdc, L"GAME LIBRARY", L.section1, fonts.section, Theme::TextFaint, 2);
+
+                // Path edit ring (child sits inside; ring reads as a crisp border)
+                Theme::RoundRectFill(hdc,
+                    RECT{L.rEdit.left, L.rEdit.top - 1, L.rEdit.right + 1, L.rEdit.bottom + 1},
+                    s(6), Theme::Card, 255, Theme::CardBorder, 255);
+
+                // Rounded rings for every combo field (combos are clipped inside these)
+                for (const RECT* fr : {&L.rComboGame, &L.rComboAudio, &L.rComboSpeed,
+                                       &L.rComboPrim, &L.rComboSec}) {
+                    Theme::RoundRectFill(hdc,
+                        RECT{fr->left, fr->top - 1, fr->right + 1, fr->bottom + 1},
+                        s(6), Theme::Inner, 255, Theme::CardBorder, 255);
+                }
+
+                // --- Card 2: LANGUAGES & PLAYBACK
+                Theme::RoundRectFill(hdc, L.card2, s(10), Theme::Card, 255, Theme::CardBorder, 230);
+                Theme::DrawLabel(hdc, L"LANGUAGES & PLAYBACK", L.section2, fonts.section, Theme::TextFaint, 2);
+                Theme::DrawLabel(hdc, L"SPOKEN AUDIO", L.micro1, fonts.section, Theme::TextFaint, 1);
+                Theme::DrawLabel(hdc, L"PLAYBACK SPEED", L.micro2, fonts.section, Theme::TextFaint, 1);
+                Theme::DrawLabel(hdc, L"PRIMARY · TOP LINE", L.micro3, fonts.section, Theme::Gold, 1);
+                Theme::DrawLabel(hdc, L"SECONDARY · BOTTOM LINE", L.micro4, fonts.section, Theme::IceWhite, 1);
+
+                // --- Card 3: ACTIONS
+                Theme::RoundRectFill(hdc, L.card3, s(10), Theme::Card, 255, Theme::CardBorder, 230);
+                Theme::DrawLabel(hdc, L"ACTIONS", L.section3, fonts.section, Theme::TextFaint, 2);
+
+                // --- Buttons (region-drawn on top of cards)
+                for (const auto& b : buttons) {
+                    Theme::DrawBtn(hdc, b, btn_state[b.id], dpi, fonts.btn);
+                }
+
+                // --- Status line
+                COLORREF dot = status_tone == ToneOk ? Theme::StatusOk
+                             : status_tone == ToneWarn ? Theme::StatusWarn : Theme::StatusInfo;
+                Theme::FillCircle(hdc,
+                    (L.rStatusDot.left + L.rStatusDot.right) / 2,
+                    (L.rStatusDot.top + L.rStatusDot.bottom) / 2,
+                    s(4), dot);
+                HFONT fnt_old = static_cast<HFONT>(SelectObject(hdc, fonts.status));
+                SetBkMode(hdc, TRANSPARENT);
+                SetTextColor(hdc, Theme::TextMuted);
+                DrawTextW(hdc, status_text.c_str(), -1, &L.rStatusText,
+                          DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
+                SelectObject(hdc, fnt_old);
+
+                // --- Footer
+                Theme::DrawLabel(hdc, L"100% Anti-Cheat Safe · Zero Injection · Zero DLLs · Zero Hooks",
+                    L.footer, fonts.section, Theme::TextFaint, 1, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
+
                 EndPaint(hwnd, &ps);
                 return 0;
             }
 
             case WM_DESTROY:
+                Theme::DestroyFontSet(fonts);
+                if (bEditBg) { DeleteObject(bEditBg); bEditBg = nullptr; }
+                if (bListBg) { DeleteObject(bListBg); bListBg = nullptr; }
                 PostQuitMessage(0);
                 return 0;
         }
@@ -447,30 +843,58 @@ public:
     }
 
     static int RunGui() {
+        Theme::EnablePerMonitorDpi();
+        Theme::BootGdiplus();
         HINSTANCE hInst = GetModuleHandleW(nullptr);
-        const wchar_t* clsName = L"DualTitleNativeGuiWndV4";
+        const wchar_t* clsName = L"DualTitleAuroraGuiWndV5";
 
+        static HBRUSH bgBrush = CreateSolidBrush(Theme::Window);
         WNDCLASSW wc = {};
+        wc.style = CS_HREDRAW | CS_VREDRAW;
         wc.lpfnWndProc = GuiWndProc;
         wc.hInstance = hInst;
         wc.lpszClassName = clsName;
         wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
-        wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+        wc.hbrBackground = bgBrush;
         wc.hIcon = static_cast<HICON>(LoadImageW(nullptr, L"assets\\dualtitle.ico", IMAGE_ICON, 32, 32, LR_LOADFROMFILE));
         if (!wc.hIcon) wc.hIcon = LoadIcon(hInst, MAKEINTRESOURCE(101));
         RegisterClassW(&wc);
 
+        // DPI-aware pre-window sizing
+        HDC sdc = GetDC(nullptr);
+        int screen_dpi = GetDeviceCaps(sdc, LOGPIXELSX);
+        ReleaseDC(nullptr, sdc);
+        if (screen_dpi == 0) screen_dpi = 96;
+        dpi = screen_dpi; // used by GetLayout before WM_CREATE, refined in WM_CREATE
+
         int sw = GetSystemMetrics(SM_CXSCREEN);
         int sh = GetSystemMetrics(SM_CYSCREEN);
-        int w = 630, h = 585;
+        DWORD style = WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
+        RECT wr{0, 0, Theme::S(680, screen_dpi), Theme::S(590, screen_dpi)};
+        AdjustWindowRect(&wr, style, FALSE);
+        int w = wr.right - wr.left;
+        int h = wr.bottom - wr.top;
+
         HWND hwnd = CreateWindowExW(
-            0, clsName,
-            L"DualTitle — Universal Anti-Cheat-Safe Dual Subtitles & Save Controller",
-            WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_VISIBLE,
+            WS_EX_APPWINDOW, clsName,
+            L"DualTitle — Universal Dual Subtitles",
+            style | WS_VISIBLE,
             (sw - w) / 2, (sh - h) / 2, w, h,
             nullptr, nullptr, hInst, nullptr
         );
         if (!hwnd) return 1;
+
+        // Dark title bar (Windows 10 1809+)
+        using DwmSetWA = HRESULT (WINAPI*)(HWND, DWORD, LPCVOID, DWORD);
+        HMODULE dwm = GetModuleHandleW(L"dwmapi.dll");
+        if (dwm) {
+            auto set_attr = reinterpret_cast<DwmSetWA>(GetProcAddress(dwm, "DwmSetWindowAttribute"));
+            if (set_attr) {
+                BOOL on = TRUE;
+                set_attr(hwnd, 20, &on, sizeof(on));
+                set_attr(hwnd, 19, &on, sizeof(on));
+            }
+        }
 
         ShowWindow(hwnd, SW_SHOW);
         UpdateWindow(hwnd);

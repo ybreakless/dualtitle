@@ -1,24 +1,21 @@
 #pragma once
 /**
  * DualTitleOverlay.hpp — Universal Anti-Cheat-Safe C++17 Win32 Topmost In-Game HUD
+ * ("Aurora" Modern-Minimal Edition)
  *
  * Features:
  *   • 100% Out-of-Process DWM Topmost Window (ZERO DLL injection, ZERO D3D/Vulkan hooks,
  *     ZERO process handle opening — never triggers PunkBuster, EAC, BattlEye, or Denuvo!).
  *   • Interactive Clickable Words: Every word in the Primary (Gold #FFD700) and Secondary
- *     (Ice-White #E2E8F0) subtitle lines is an individual clickable button on the HUD that
- *     immediately displays its Dictionary Meaning Card (phonetics, gender, translation, definition).
- *   • Extra In-Game Control Buttons right on the HUD:
- *       - [⏸ Pause Game (ESC)] : Sends safe keyboard ESC/Pause input without process hooking
- *       - [▶ Auto-Play]        : Toggles automatic subtitle cadence progression
- *       - [- Speed] [1.00x] [+ Speed] : Controls subtitle & reading speed (0.25x to 2.00x)
- *       - [◀ Prev] [Next ▶]    : Navigate dialogue lines backward and forward
- *       - [🔲 Borderless]      : Converts active window to Borderless Fullscreen (ALT+F11)
- *       - [💾 Restore Save]    : 1-click Save & Profile Restore right from the HUD
- *       - [✕ Close]            : Closes or hides the overlay (ALT+F8)
+ *     (Ice-White #E2E8F0) subtitle lines is individually clickable and instantly shows its
+ *     Dictionary Meaning Card (phonetics, gender, translation, definition).
+ *   • Modern flat control bar with hover feedback:
+ *       [‹ Prev] [● Auto] [Next ›] [−] [1.00×] [+] [Pause (ESC)] [Borderless] [Restore] [✕]
+ *   • Global hotkeys: ALT+F9 pause · ALT+F10 next line · ALT+F8 show/hide · ALT+F11 borderless
  */
 
 #include "DualTitleEngine.hpp"
+#include "DualTitleTheme.hpp"
 
 #ifdef _WIN32
 #ifndef UNICODE
@@ -48,14 +45,6 @@ struct ClickableWordBox {
     bool is_primary;
 };
 
-struct OverlayButtonBox {
-    int id;
-    RECT rc;
-    std::wstring label;
-    COLORREF bg_color;
-    COLORREF fg_color;
-};
-
 class Win32UniversalOverlay {
 public:
     static inline std::vector<DualDialogueLine> active_lines;
@@ -65,10 +54,15 @@ public:
     static inline bool auto_play_enabled = false;
     static inline double playback_speed = 1.0; // 0.25x .. 2.0x
     static inline std::wstring status_dictionary_text =
-        L"💡 Click any word in the subtitles above to see its meaning, phonetics & grammar notes!";
+        L"Click any word in the subtitles to see its meaning, phonetics & grammar notes.";
     static inline std::vector<ClickableWordBox> word_boxes;
-    static inline std::vector<OverlayButtonBox> control_buttons;
+    static inline std::vector<Theme::FlatBtn> control_buttons;
+    static inline std::map<int, Theme::BtnState> ctrl_state;
     static inline HWND last_game_hwnd = nullptr;
+    static inline Theme::FontSet hud_fonts;
+    static inline int hud_dpi = 96;
+    static inline int hovered_word = -1;
+    static inline bool mouse_tracking = false;
 
     enum ButtonId {
         BTN_PREV = 1,
@@ -118,9 +112,9 @@ public:
             inputs[1].ki.wVk = VK_ESCAPE;
             inputs[1].ki.dwFlags = KEYEVENTF_KEYUP;
             SendInput(2, inputs, sizeof(INPUT));
-            status_dictionary_text = L"⏸ Sent safe in-game Pause (ESC) — zero process hooks used. Click any word to inspect!";
+            status_dictionary_text = L"Pause (ESC) sent to the running window — zero process hooks used.";
         } else {
-            status_dictionary_text = L"⏸ Switch to your running application window first, then click [Pause Game] or press ALT+F9.";
+            status_dictionary_text = L"Switch to your running application window first, then click Pause or press ALT+F9.";
         }
     }
 
@@ -132,7 +126,7 @@ public:
         RememberForegroundGameWindow(overlay_hwnd);
         HWND target = last_game_hwnd ? last_game_hwnd : GetForegroundWindow();
         if (!target || target == overlay_hwnd || !IsWindow(target)) {
-            status_dictionary_text = L"🔲 Click inside your running application window first, then press ALT+F11 or [Borderless].";
+            status_dictionary_text = L"Click inside your running application window first, then press Borderless or ALT+F11.";
             return;
         }
         int sw = GetSystemMetrics(SM_CXSCREEN);
@@ -142,8 +136,7 @@ public:
         SetWindowLongPtrW(target, GWL_STYLE, new_style);
         SetWindowPos(target, HWND_NOTOPMOST, 0, 0, sw, sh, SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_SHOWWINDOW);
         SetWindowPos(overlay_hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
-        status_dictionary_text = L"🔲 Converted application window to Borderless Fullscreen (" +
-                                 std::to_wstring(sw) + L"x" + std::to_wstring(sh) + L")!";
+        status_dictionary_text = L"Borderless fullscreen applied (" + std::to_wstring(sw) + L" × " + std::to_wstring(sh) + L").";
     }
 
     static void UpdateSpeedTimer(HWND hwnd) {
@@ -157,34 +150,83 @@ public:
     static void LookupAndShowWord(const std::string& word) {
         auto info = FamousDictionary::Lookup(word);
         std::ostringstream ss;
-        ss << "📖 [" << info.word << "]";
-        if (!info.phonetic.empty()) ss << " " << info.phonetic;
-        if (!info.gender.empty()) ss << " (" << info.gender << ")";
-        else if (!info.pos.empty()) ss << " (" << info.pos << ")";
-        ss << "  →  " << info.translation << "  |  " << info.definition;
+        ss << info.word;
+        if (!info.phonetic.empty()) ss << "  " << info.phonetic;
+        if (!info.gender.empty()) ss << "  ·  " << info.gender;
+        else if (!info.pos.empty()) ss << "  ·  " << info.pos;
+        if (!info.translation.empty()) ss << "  →  " << info.translation;
+        if (!info.definition.empty()) ss << "  —  " << info.definition;
         status_dictionary_text = Utf8ToWide(ss.str());
     }
 
     static void DrawDualTitleMiniLogo(HDC hdc, int x, int y, int size) {
-        // Draws the signature DualTitle badge (dark rounded tile + gold top bar + white bottom bar)
-        HBRUSH badgeBg = CreateSolidBrush(RGB(20, 28, 46));
-        RECT rcBadge = {x, y, x + size, y + size};
-        FillRect(hdc, &rcBadge, badgeBg);
-        DeleteObject(badgeBg);
+        Theme::BootGdiplus();
+        // Signature badge: rounded dark tile + gold top bar + white bottom bar + sky dots
+        Theme::RoundRectFill(hdc, RECT{x, y, x + size, y + size},
+                             size / 5, RGB(15, 19, 28), 255, RGB(38, 44, 58), 220);
+        double u = size / 44.0;
+        Theme::RoundRectFill(hdc, RECT{
+            x + static_cast<int>(4 * u), y + static_cast<int>(9 * u),
+            x + size - static_cast<int>(4 * u), y + static_cast<int>(13 * u)
+        }, static_cast<int>(2 * u), Theme::Gold);
+        Theme::RoundRectFill(hdc, RECT{
+            x + static_cast<int>(4 * u), y + static_cast<int>(16 * u),
+            x + size - static_cast<int>(4 * u), y + static_cast<int>(20 * u)
+        }, static_cast<int>(2 * u), Theme::IceWhite);
+        Theme::FillCircle(hdc, x + static_cast<int>(15 * u), y + static_cast<int>(30 * u),
+                          static_cast<int>(3.5 * u), Theme::Accent);
+        Theme::FillCircle(hdc, x + size - static_cast<int>(15 * u), y + static_cast<int>(30 * u),
+                          static_cast<int>(3.5 * u), Theme::DangerText, 190);
+    }
 
-        HBRUSH borderB = CreateSolidBrush(RGB(56, 189, 248));
-        FrameRect(hdc, &rcBadge, borderB);
-        DeleteObject(borderB);
+    static void BuildControlButtons(HWND hwnd) {
+        control_buttons.clear();
+        auto s = [&](int v) { return Theme::S(v, hud_dpi); };
+        RECT rc_client{};
+        GetClientRect(hwnd, &rc_client);
+        int y = s(6), h = s(24);
+        int x = rc_client.right - s(12);
+        double spd_f = playback_speed;
+        wchar_t spd_lbl[16];
+        swprintf(spd_lbl, 16, L"%.2f×", spd_f);
 
-        HBRUSH topBar = CreateSolidBrush(RGB(255, 215, 0));
-        RECT rcTop = {x + 4, y + 6, x + size - 5, y + 12};
-        FillRect(hdc, &rcTop, topBar);
-        DeleteObject(topBar);
+        struct Spec { int id; const wchar_t* label; int w; Theme::BtnKind kind; };
+        Spec specs[] = {
+            {BTN_RESTORE_SAVE, L"Restore", s(64), Theme::BtnTeal},
+            {BTN_BORDERLESS,  L"Borderless", s(80), Theme::BtnGhost},
+            {BTN_GAME_PAUSE,  L"Pause (ESC)", s(90), Theme::BtnGhost},
+            {BTN_SPEED_UP,    L"+", s(26), Theme::BtnGhost},
+            {BTN_SPEED_RESET, spd_lbl, s(60), Theme::BtnGhost},
+            {BTN_SPEED_DOWN,  L"−", s(26), Theme::BtnGhost},
+            {BTN_NEXT,        L"Next ›", s(58), Theme::BtnGhost},
+            {BTN_PLAY_PAUSE,  L"Auto", s(56), Theme::BtnGhost},
+            {BTN_PREV,        L"‹ Prev", s(54), Theme::BtnGhost},
+            {BTN_CLOSE,       L"✕", s(26), Theme::BtnDanger}
+        };
+        for (auto& sp : specs) {
+            RECT br{ x - sp.w, y, x, y + h };
+            control_buttons.push_back({sp.id, br, sp.label, sp.kind});
+            x -= sp.w + s(6);
+        }
+        // Auto toggle attributes live on the matched button
+        for (auto& b : control_buttons) {
+            if (b.id == BTN_PLAY_PAUSE) { b.is_toggle = true; b.toggle_on = auto_play_enabled; }
+            if (b.id == BTN_SPEED_RESET) b.text_override = Theme::Gold;
+            if (b.id == BTN_GAME_PAUSE) b.text_override = Theme::Accent;
+        }
+    }
 
-        HBRUSH botBar = CreateSolidBrush(RGB(248, 250, 252));
-        RECT rcBot = {x + 6, y + 15, x + size - 3, y + 21};
-        FillRect(hdc, &rcBot, botBar);
-        DeleteObject(botBar);
+    static Theme::FlatBtn* HitControlButton(const POINT& pt) {
+        for (auto& b : control_buttons) {
+            if (PtInRect(&b.rc, pt)) return &b;
+        }
+        return nullptr;
+    }
+
+    static void EnsureTrackMouse(HWND hwnd) {
+        if (mouse_tracking) return;
+        TRACKMOUSEEVENT tme{sizeof(tme), TME_LEAVE, hwnd, 0};
+        if (TrackMouseEvent(&tme)) mouse_tracking = true;
     }
 
     static LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
@@ -205,6 +247,65 @@ public:
                     InvalidateRect(hwnd, nullptr, TRUE);
                 }
                 return 0;
+
+            case WM_MOUSEMOVE: {
+                EnsureTrackMouse(hwnd);
+                POINT pt{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+                BuildControlButtons(hwnd);
+                for (auto& b : control_buttons) {
+                    auto& st = ctrl_state[b.id];
+                    bool hov = PtInRect(&b.rc, pt) != FALSE;
+                    if (st.hover != hov) {
+                        st.hover = hov;
+                        InvalidateRect(hwnd, &b.rc, TRUE);
+                    }
+                }
+                // Word hover tracking
+                int new_hover = -1;
+                for (size_t i = 0; i < word_boxes.size(); ++i) {
+                    if (PtInRect(&word_boxes[i].rc, pt)) {
+                        new_hover = static_cast<int>(i);
+                        break;
+                    }
+                }
+                if (new_hover != hovered_word) {
+                    if (hovered_word >= 0 && hovered_word < static_cast<int>(word_boxes.size())) {
+                        InvalidateRect(hwnd, &word_boxes[static_cast<size_t>(hovered_word)].rc, TRUE);
+                    }
+                    hovered_word = new_hover;
+                    if (hovered_word >= 0) {
+                        InvalidateRect(hwnd, &word_boxes[static_cast<size_t>(hovered_word)].rc, TRUE);
+                    }
+                }
+                return 0;
+            }
+
+            case WM_MOUSELEAVE: {
+                mouse_tracking = false;
+                for (auto& b : control_buttons) ctrl_state[b.id].hover = false;
+                if (hovered_word >= 0 && hovered_word < static_cast<int>(word_boxes.size())) {
+                    InvalidateRect(hwnd, &word_boxes[static_cast<size_t>(hovered_word)].rc, TRUE);
+                }
+                hovered_word = -1;
+                InvalidateRect(hwnd, nullptr, TRUE);
+                return 0;
+            }
+
+            case WM_SETCURSOR: {
+                if (LOWORD(lparam) == HTCLIENT) {
+                    POINT pt{};
+                    GetCursorPos(&pt);
+                    ScreenToClient(hwnd, &pt);
+                    BuildControlButtons(hwnd);
+                    bool hand = HitControlButton(pt) != nullptr;
+                    for (const auto& wb : word_boxes) {
+                        if (PtInRect(&wb.rc, pt)) { hand = true; break; }
+                    }
+                    SetCursor(LoadCursor(nullptr, hand ? IDC_HAND : IDC_ARROW));
+                    return TRUE;
+                }
+                break;
+            }
 
             case WM_MOUSEACTIVATE:
                 // Never steal keyboard focus from the running game when clicking overlay buttons/words!
@@ -229,65 +330,64 @@ public:
             case WM_LBUTTONDOWN: {
                 POINT pt = {GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
 
-                // 1. Check if user clicked any In-Game Control Button
-                for (const auto& btn : control_buttons) {
-                    if (PtInRect(&btn.rc, pt)) {
-                        switch (btn.id) {
-                            case BTN_PREV:
-                                if (!active_lines.empty()) {
-                                    current_line_idx = (current_line_idx + active_lines.size() - 1) % active_lines.size();
-                                }
-                                break;
-                            case BTN_NEXT:
-                                if (!active_lines.empty()) {
-                                    current_line_idx = (current_line_idx + 1) % active_lines.size();
-                                }
-                                break;
-                            case BTN_PLAY_PAUSE:
-                                auto_play_enabled = !auto_play_enabled;
-                                UpdateSpeedTimer(hwnd);
-                                status_dictionary_text = auto_play_enabled
-                                    ? L"▶ Auto-Advancing Subtitles ON (Speed: " + std::to_wstring(playback_speed).substr(0, 4) + L"x)"
-                                    : L"⏸ Auto-Advancing Subtitles PAUSED — Click any word to see its meaning!";
-                                break;
-                            case BTN_SPEED_DOWN:
-                                playback_speed = std::max(0.25, playback_speed - 0.25);
-                                UpdateSpeedTimer(hwnd);
-                                status_dictionary_text = L"🐢 Subtitle Speed decreased to " + std::to_wstring(playback_speed).substr(0, 4) + L"x";
-                                break;
-                            case BTN_SPEED_RESET:
-                                playback_speed = 1.0;
-                                UpdateSpeedTimer(hwnd);
-                                status_dictionary_text = L"⚡ Subtitle Speed reset to 1.00x";
-                                break;
-                            case BTN_SPEED_UP:
-                                playback_speed = std::min(2.0, playback_speed + 0.25);
-                                UpdateSpeedTimer(hwnd);
-                                status_dictionary_text = L"🚀 Subtitle Speed increased to " + std::to_wstring(playback_speed).substr(0, 4) + L"x";
-                                break;
-                            case BTN_GAME_PAUSE:
-                                SendSafeGamePause(hwnd);
-                                break;
-                            case BTN_BORDERLESS:
-                                MakeTargetGameBorderless(hwnd);
-                                break;
-                            case BTN_RESTORE_SAVE: {
-                                std::ostringstream log_ss;
-                                int cnt = SaveBackupManager::RestoreSaves(active_game_dir, log_ss);
-                                status_dictionary_text = L"💾 Restore Save complete (" + std::to_wstring(cnt) +
-                                                         L" save/profile file(s) restored & verified)!";
-                                break;
+                // 1. In-Game Control Buttons
+                BuildControlButtons(hwnd);
+                if (auto* btn = HitControlButton(pt)) {
+                    switch (btn->id) {
+                        case BTN_PREV:
+                            if (!active_lines.empty()) {
+                                current_line_idx = (current_line_idx + active_lines.size() - 1) % active_lines.size();
                             }
-                            case BTN_CLOSE:
-                                DestroyWindow(hwnd);
-                                return 0;
+                            break;
+                        case BTN_NEXT:
+                            if (!active_lines.empty()) {
+                                current_line_idx = (current_line_idx + 1) % active_lines.size();
+                            }
+                            break;
+                        case BTN_PLAY_PAUSE:
+                            auto_play_enabled = !auto_play_enabled;
+                            UpdateSpeedTimer(hwnd);
+                            status_dictionary_text = auto_play_enabled
+                                ? L"Auto-advance on — subtitles move by themselves."
+                                : L"Auto-advance paused — click any word to inspect it.";
+                            break;
+                        case BTN_SPEED_DOWN:
+                            playback_speed = std::max(0.25, playback_speed - 0.25);
+                            UpdateSpeedTimer(hwnd);
+                            status_dictionary_text = L"Speed: " + SpeedLabel();
+                            break;
+                        case BTN_SPEED_RESET:
+                            playback_speed = 1.0;
+                            UpdateSpeedTimer(hwnd);
+                            status_dictionary_text = L"Speed reset to 1.00×";
+                            break;
+                        case BTN_SPEED_UP:
+                            playback_speed = std::min(2.0, playback_speed + 0.25);
+                            UpdateSpeedTimer(hwnd);
+                            status_dictionary_text = L"Speed: " + SpeedLabel();
+                            break;
+                        case BTN_GAME_PAUSE:
+                            SendSafeGamePause(hwnd);
+                            break;
+                        case BTN_BORDERLESS:
+                            MakeTargetGameBorderless(hwnd);
+                            break;
+                        case BTN_RESTORE_SAVE: {
+                            std::ostringstream log_ss;
+                            int cnt = SaveBackupManager::RestoreSaves(active_game_dir, log_ss);
+                            status_dictionary_text = L"Restore complete — " + std::to_wstring(cnt) +
+                                                     L" save/profile file(s) restored & verified.";
+                            break;
                         }
-                        InvalidateRect(hwnd, nullptr, TRUE);
-                        return 0;
+                        case BTN_CLOSE:
+                            DestroyWindow(hwnd);
+                            return 0;
                     }
+                    InvalidateRect(hwnd, nullptr, TRUE);
+                    return 0;
                 }
 
-                // 2. Check if user clicked any Word in the Primary or Secondary Subtitle Line
+                // 2. Words in the Primary or Secondary Subtitle Line
                 for (const auto& wb : word_boxes) {
                     if (PtInRect(&wb.rc, pt)) {
                         LookupAndShowWord(wb.word);
@@ -301,80 +401,42 @@ public:
             case WM_PAINT: {
                 PAINTSTRUCT ps;
                 HDC hdc = BeginPaint(hwnd, &ps);
+                Theme::BootGdiplus();
                 RECT rc;
                 GetClientRect(hwnd, &rc);
+                auto s = [&](int v) { return Theme::S(v, hud_dpi); };
 
-                // Dark translucent subtitle card background (#0B0F19)
-                HBRUSH bgBrush = CreateSolidBrush(RGB(11, 15, 25));
-                FillRect(hdc, &rc, bgBrush);
-                DeleteObject(bgBrush);
+                // Outer card — rounded, translucent charcoal w/ hairline border
+                Theme::RoundRectFill(hdc, rc, s(14), Theme::Inner, 238, RGB(36, 42, 56), 210);
 
-                // Sky-blue border (#38BDF8)
-                HBRUSH borderBrush = CreateSolidBrush(RGB(56, 189, 248));
-                FrameRect(hdc, &rc, borderBrush);
-                DeleteObject(borderBrush);
+                // Header: logo + wordmark + progress
+                DrawDualTitleMiniLogo(hdc, s(10), s(8), s(24));
+                HFONT fWordmark = hud_fonts.section;
+                RECT rcTitle{s(44), s(8), s(184), s(30)};
+                Theme::DrawLabel(hdc, L"DUALTITLE", rcTitle, fWordmark, Theme::TextMuted, 2);
 
-                SetBkMode(hdc, TRANSPARENT);
+                std::wstring progress =
+                    std::to_wstring((current_line_idx % std::max<size_t>(1, active_lines.size())) + 1) +
+                    L" / " + std::to_wstring(std::max<size_t>(1, active_lines.size()));
+                Theme::DrawLabel(hdc, progress, RECT{s(150), s(8), s(230), s(30)}, hud_fonts.section, Theme::TextFaint, 1);
 
-                // Draw Mini DualTitle Logo + Control Bar at top (y = 6..32)
-                DrawDualTitleMiniLogo(hdc, 12, 6, 26);
-
-                HFONT hFontBtn = CreateFontW(14, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
-                    DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-                    DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
-                HFONT oldFont = static_cast<HFONT>(SelectObject(hdc, hFontBtn));
-
-                SetTextColor(hdc, RGB(56, 189, 248));
-                RECT rcTitle = {46, 6, 300, 32};
-                std::wstring lineBadge = L"DUALTITLE HUD (" +
-                    std::to_wstring((current_line_idx % std::max<size_t>(1, active_lines.size())) + 1) + L"/" +
-                    std::to_wstring(std::max<size_t>(1, active_lines.size())) + L")";
-                DrawTextW(hdc, lineBadge.c_str(), -1, &rcTitle, DT_LEFT | DT_SINGLELINE | DT_VCENTER);
-
-                // Build interactive control buttons across the top bar
-                control_buttons.clear();
-                std::wstringstream sp_ss;
-                sp_ss << std::fixed << std::setprecision(2) << playback_speed << L"x";
-                std::wstring speed_lbl = L"⚡ " + sp_ss.str();
-
-                struct BtnSpec { int id; std::wstring text; int width; COLORREF bg; COLORREF fg; };
-                std::vector<BtnSpec> specs = {
-                    {BTN_PREV, L"◀ Prev", 56, RGB(30, 41, 59), RGB(248, 250, 252)},
-                    {BTN_PLAY_PAUSE, auto_play_enabled ? L"⏸ Auto:ON" : L"▶ Auto:OFF", 78, auto_play_enabled ? RGB(5, 150, 105) : RGB(30, 41, 59), RGB(255, 255, 255)},
-                    {BTN_NEXT, L"Next ▶", 56, RGB(30, 41, 59), RGB(248, 250, 252)},
-                    {BTN_SPEED_DOWN, L"- Spd", 48, RGB(30, 41, 59), RGB(167, 243, 208)},
-                    {BTN_SPEED_RESET, speed_lbl, 62, RGB(15, 23, 42), RGB(255, 215, 0)},
-                    {BTN_SPEED_UP, L"+ Spd", 48, RGB(30, 41, 59), RGB(167, 243, 208)},
-                    {BTN_GAME_PAUSE, L"⏸ Game (ESC)", 92, RGB(2, 132, 199), RGB(255, 255, 255)},
-                    {BTN_BORDERLESS, L"🔲 Borderless", 88, RGB(79, 70, 229), RGB(255, 255, 255)},
-                    {BTN_RESTORE_SAVE, L"💾 Restore Save", 104, RGB(13, 148, 136), RGB(255, 255, 255)},
-                    {BTN_CLOSE, L"✕", 28, RGB(127, 29, 29), RGB(255, 255, 255)}
-                };
-
-                int cur_x = rc.right - 12;
-                for (auto it = specs.rbegin(); it != specs.rend(); ++it) {
-                    RECT brc = {cur_x - it->width, 6, cur_x, 30};
-                    HBRUSH bBrush = CreateSolidBrush(it->bg);
-                    FillRect(hdc, &brc, bBrush);
-                    DeleteObject(bBrush);
-                    SetTextColor(hdc, it->fg);
-                    DrawTextW(hdc, it->text.c_str(), -1, &brc, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
-                    control_buttons.push_back({it->id, brc, it->text, it->bg, it->fg});
-                    cur_x -= (it->width + 5);
+                // Control buttons on the right
+                BuildControlButtons(hwnd);
+                for (const auto& b : control_buttons) {
+                    Theme::DrawBtn(hdc, b, ctrl_state[b.id], hud_dpi, hud_fonts.btn);
                 }
 
-                // Render Interactive Clickable Words for Top & Bottom Subtitle Lines
-                word_boxes.clear();
+                // Current subtitle line pair
                 if (active_lines.empty()) {
                     active_lines = SubtitleMerger::IndexGameSubtitlesReadOnly(active_game_dir);
                 }
                 const auto& item = active_lines[current_line_idx % active_lines.size()];
 
-                auto draw_clickable_sentence = [&](const std::string& sentence, int top_y, int bot_y, int font_px, int weight, COLORREF color, bool is_prim) {
-                    HFONT hFont = CreateFontW(font_px, 0, 0, 0, weight, FALSE, FALSE, FALSE,
-                        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-                        DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
-                    SelectObject(hdc, hFont);
+                word_boxes.clear();
+                auto draw_clickable_sentence = [&](const std::string& sentence, int top_y, int bot_y,
+                                                   int font_px, int weight, COLORREF color, bool is_prim) {
+                    HFONT hFont = Theme::MakeFont(hud_dpi, font_px, weight);
+                    HFONT old = static_cast<HFONT>(SelectObject(hdc, hFont));
                     SetTextColor(hdc, color);
 
                     std::istringstream iss(sentence);
@@ -398,40 +460,52 @@ public:
                     }
                     if (!tokens.empty()) total_w += static_cast<int>(tokens.size() - 1) * gap;
 
-                    int start_x = std::max<int>(16, (rc.right - total_w) / 2);
+                    int start_x = std::max<int>(s(16), (rc.right - total_w) / 2);
                     for (size_t i = 0; i < tokens.size(); ++i) {
                         std::wstring wt = Utf8ToWide(tokens[i]);
-                        RECT wrc = {start_x, top_y, start_x + widths[i], bot_y};
+                        RECT wrc{start_x, top_y, start_x + widths[i], bot_y};
                         DrawTextW(hdc, wt.c_str(), -1, &wrc, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
                         word_boxes.push_back({wrc, tokens[i], is_prim});
                         start_x += widths[i] + gap;
                     }
+                    SelectObject(hdc, old);
                     DeleteObject(hFont);
                 };
 
-                // Top Line: Primary Subtitle in Gold (#FFD700)
-                draw_clickable_sentence(item.primary, 36, 74, 25, FW_BOLD, RGB(255, 215, 0), true);
+                // Top line — primary subtitle in gold; bottom line — secondary in ice-white
+                draw_clickable_sentence(item.primary, s(40), s(74), 24, FW_SEMIBOLD, Theme::Gold, true);
+                draw_clickable_sentence(item.secondary, s(78), s(108), 19, FW_NORMAL, Theme::IceWhite, false);
 
-                // Bottom Line: Secondary Subtitle in Crisp Ice-White (#E2E8F0)
-                draw_clickable_sentence(item.secondary, 76, 110, 21, FW_NORMAL, RGB(226, 232, 240), false);
+                // Hover highlight: pill under the hovered word, text redrawn on top
+                if (hovered_word >= 0 && hovered_word < static_cast<int>(word_boxes.size())) {
+                    const auto& wb = word_boxes[static_cast<size_t>(hovered_word)];
+                    RECT pr{wb.rc.left - s(3), wb.rc.top - s(1), wb.rc.right + s(3), wb.rc.bottom + s(1)};
+                    Theme::RoundRectFill(hdc, pr, s(6), Theme::Accent, 42);
+                    HFONT fHover = Theme::MakeFont(hud_dpi, wb.is_primary ? 24 : 19,
+                                                   wb.is_primary ? FW_SEMIBOLD : FW_NORMAL);
+                    HFONT old_h = static_cast<HFONT>(SelectObject(hdc, fHover));
+                    SetBkMode(hdc, TRANSPARENT);
+                    SetTextColor(hdc, wb.is_primary ? Theme::Gold : Theme::IceWhite);
+                    std::wstring wt = Utf8ToWide(wb.word);
+                    RECT wrc_copy{wb.rc.left, wb.rc.top, wb.rc.right, wb.rc.bottom};
+                    DrawTextW(hdc, wt.c_str(), -1, &wrc_copy, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
+                    SelectObject(hdc, old_h);
+                    DeleteObject(fHover);
+                }
 
-                // Bottom Word Meaning & Dictionary Bar (y = 114..144)
-                RECT rcDictBg = {10, 114, rc.right - 10, rc.bottom - 6};
-                HBRUSH dictBrush = CreateSolidBrush(RGB(17, 24, 39));
-                FillRect(hdc, &rcDictBg, dictBrush);
-                DeleteObject(dictBrush);
+                // Bottom dictionary bar — rounded inner card
+                RECT rcDict{s(12), s(116), rc.right - s(12), rc.bottom - s(6)};
+                Theme::RoundRectFill(hdc, rcDict, s(8), RGB(15, 20, 28), 255, RGB(28, 34, 46), 200);
+                HFONT fntDict = Theme::MakeFont(hud_dpi, 13, FW_NORMAL);
+                HFONT old_d = static_cast<HFONT>(SelectObject(hdc, fntDict));
+                RECT rcDictTxt{rcDict.left + s(16), rcDict.top, rcDict.right - s(16), rcDict.bottom};
+                SetBkMode(hdc, TRANSPARENT);
+                SetTextColor(hdc, Theme::DictText);
+                DrawTextW(hdc, status_dictionary_text.c_str(), -1, &rcDictTxt,
+                          DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
+                SelectObject(hdc, old_d);
+                DeleteObject(fntDict);
 
-                HFONT hFontDict = CreateFontW(15, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-                    DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-                    DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
-                SelectObject(hdc, hFontDict);
-                SetTextColor(hdc, RGB(167, 243, 208));
-                RECT rcDictTxt = {18, 114, rc.right - 18, rc.bottom - 6};
-                DrawTextW(hdc, status_dictionary_text.c_str(), -1, &rcDictTxt, DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
-
-                SelectObject(hdc, oldFont);
-                DeleteObject(hFontBtn);
-                DeleteObject(hFontDict);
                 EndPaint(hwnd, &ps);
                 return 0;
             }
@@ -439,10 +513,17 @@ public:
             case WM_DESTROY:
                 KillTimer(hwnd, 200);
                 KillTimer(hwnd, 201);
+                Theme::DestroyFontSet(hud_fonts);
                 PostQuitMessage(0);
                 return 0;
         }
         return DefWindowProcW(hwnd, msg, wparam, lparam);
+    }
+
+    static std::wstring SpeedLabel() {
+        wchar_t buf[16];
+        swprintf(buf, 16, L"%.2f×", playback_speed);
+        return buf;
     }
 
     static int RunOverlayLoop(
@@ -451,13 +532,16 @@ public:
         const std::string& secondary_lang = "de",
         double initial_speed = 1.0
     ) {
+        Theme::EnablePerMonitorDpi();
+        Theme::BootGdiplus();
         active_game_dir = game_dir;
         playback_speed = initial_speed;
         active_lines = SubtitleMerger::IndexGameSubtitlesReadOnly(game_dir, primary_lang, secondary_lang);
         current_line_idx = 0;
+        hovered_word = -1;
 
         HINSTANCE hInst = GetModuleHandleW(nullptr);
-        const wchar_t* clsName = L"DualTitleInteractiveOverlayV4";
+        const wchar_t* clsName = L"DualTitleAuroraOverlayV5";
 
         WNDCLASSW wc = {};
         wc.lpfnWndProc = OverlayWndProc;
@@ -466,25 +550,28 @@ public:
         wc.hCursor = LoadCursor(nullptr, IDC_HAND);
         RegisterClassW(&wc);
 
-        int screenW = GetSystemMetrics(SM_CXSCREEN);
-        int screenH = GetSystemMetrics(SM_CYSCREEN);
-        int wndW = std::min<int>(1020, screenW - 40);
-        int wndH = 148;
-        int posX = (screenW - wndW) / 2;
-        int posY = screenH - wndH - 56;
-
-        // Interactive no-activate topmost window (clickable buttons & words without stealing game focus!)
         HWND hwnd = CreateWindowExW(
             WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
-            clsName,
-            L"DualTitle In-Game Overlay",
+            clsName, L"DualTitle In-Game Overlay",
             WS_POPUP | WS_VISIBLE,
-            posX, posY, wndW, wndH,
+            CW_USEDEFAULT, CW_USEDEFAULT, 0, 0,
             nullptr, nullptr, hInst, nullptr
         );
         if (!hwnd) return 1;
 
-        SetLayeredWindowAttributes(hwnd, 0, 238, LWA_ALPHA);
+        hud_dpi = Theme::WindowDpi(hwnd);
+        Theme::MakeFontSet(hud_dpi, hud_fonts);
+        // Extra HUD fonts (fonts.btn reused; bigger line fonts are made per-paint)
+
+        int screenW = GetSystemMetrics(SM_CXSCREEN);
+        int screenH = GetSystemMetrics(SM_CYSCREEN);
+        int wndW = std::min<int>(Theme::S(1080, hud_dpi), screenW - Theme::S(40, hud_dpi));
+        int wndH = Theme::S(156, hud_dpi);
+        int posX = (screenW - wndW) / 2;
+        int posY = screenH - wndH - Theme::S(56, hud_dpi);
+        SetWindowPos(hwnd, HWND_TOPMOST, posX, posY, wndW, wndH, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+
+        SetLayeredWindowAttributes(hwnd, 0, 236, LWA_ALPHA);
         ShowWindow(hwnd, SW_SHOWNOACTIVATE);
         UpdateWindow(hwnd);
 
@@ -493,14 +580,12 @@ public:
         RegisterHotKey(hwnd, 103, MOD_ALT, VK_F8);
         RegisterHotKey(hwnd, 104, MOD_ALT, VK_F11);
 
-        std::cout << "  [DualTitle C++ Overlay] Active at bottom of screen (100% Anti-Cheat Safe Out-of-Process HUD)!\n"
+        std::cout << "  [DualTitle C++ Overlay] Aurora HUD active (100% Anti-Cheat Safe Out-of-Process)\n"
                   << "    • Click ANY word on the HUD to see its translation & dictionary definition\n"
-                  << "    • Use [- Spd] / [+ Spd] on the HUD to control subtitle speed (0.25x - 2.00x)\n"
-                  << "    • Use [💾 Restore Save] on the HUD to restore backed-up saves anytime\n"
-                  << "    • [ALT + F9]  : Safe Game Pause (ESC)\n"
-                  << "    • [ALT + F10] : Next Subtitle Line\n"
-                  << "    • [ALT + F11] : Convert Game to Borderless Fullscreen\n"
-                  << "    • [ALT + F8]  : Show/Hide Overlay\n";
+                  << "    • [-] / [+] control subtitle speed (0.25× – 2.00×), [Auto] toggles cadence\n"
+                  << "    • [Restore] brings back saved progress anytime\n"
+                  << "    • [ALT + F9] Pause Game (ESC)   [ALT + F10] Next Line\n"
+                  << "    • [ALT + F11] Borderless        [ALT + F8]  Show/Hide HUD\n";
 
         MSG msg;
         while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
