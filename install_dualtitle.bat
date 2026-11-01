@@ -31,10 +31,8 @@ if exist "%~dp0data"            xcopy /y /i /e "%~dp0data"            "%DEST%\da
 if exist "%~dp0dictionaries"    xcopy /y /i /e "%~dp0dictionaries"    "%DEST%\dictionaries"    >nul
 if exist "%~dp0README.md"       copy /y "%~dp0README.md" "%DEST%\" >nul 2>nul
 
-(
-    @echo off
-    start "" "%DEST%\DualTitle.exe"
-) > "%DEST%\DualTitle.bat"
+> "%DEST%\DualTitle.bat" echo @echo off
+>> "%DEST%\DualTitle.bat" echo start "" "%DEST%\DualTitle.exe"
 
 :: ---------------------------------------------------------------------------
 :: 2. Start Menu + Desktop shortcuts (registered in Windows Search)
