@@ -1529,6 +1529,7 @@ struct DictionaryEntry {
     std::string source;
     std::string definition;
     std::string translation;
+    std::vector<std::string> synonyms;  // "the job of the word" companions & alternatives
 };
 
 class FamousDictionary {
@@ -1546,37 +1547,53 @@ public:
         // Fallback to builtin
         static const std::map<std::string, DictionaryEntry> builtin = {
             {"look", {"look", "/lʊk/", "verb", "", "Oxford / Wiktionary",
-                      "Direct one's gaze toward someone or something in a specified direction.", "sehen, schauen"}},
+                      "Direct one's gaze toward someone or something in a specified direction.", "sehen, schauen",
+                      {"watch", "glance", "stare"}}},
             {"shadows", {"shadow", "/ˈʃædəʊ/", "noun (plural)", "der Schatten (m)", "Oxford / Wiktionary",
-                          "Dark areas or shapes produced by a body coming between rays of light and a surface.", "die Schatten"}},
+                          "Dark areas or shapes produced by a body coming between rays of light and a surface.", "die Schatten",
+                          {"shades", "silhouettes", "darkness"}}},
             {"bat", {"bat", "/bæt/", "noun", "die Fledermaus (f)", "Oxford / Wiktionary",
-                      "A nocturnal flying mammal with forelimbs adapted as wings.", "die Fledermaus (pl. die Fledermaeuse)"}},
+                      "A nocturnal flying mammal with forelimbs adapted as wings.", "die Fledermaus (pl. die Fledermaeuse)",
+                      {"club", "vampire bat", "cudgel"}}},
             {"bats", {"bat", "/bæt/", "noun (plural)", "die Fledermaus (f)", "Oxford / Wiktionary",
-                       "Plural of bat: nocturnal flying mammals.", "die Fledermaeuse"}},
+                       "Plural of bat: nocturnal flying mammals.", "die Fledermaeuse",
+                       {"clubs", "vampire bats"}}},
             {"detective", {"detective", "/dɪˈtɛktɪv/", "noun", "der Detektiv (m)", "Collins / Wiktionary",
-                            "An investigator or member of a law enforcement agency.", "der Detektiv, der Ermittler"}},
+                            "An investigator or member of a law enforcement agency.", "der Detektiv, der Ermittler",
+                            {"investigator", "sleuth", "inspector"}}},
             {"hardware", {"hardware", "/ˈhɑːdweə/", "noun", "die Ausruestung (f)", "Cambridge / Wiktionary",
-                           "Specialized mechanical equipment, tools, or tactical gear.", "die Spezialausruestung"}},
+                           "Specialized mechanical equipment, tools, or tactical gear.", "die Spezialausruestung",
+                           {"equipment", "gear", "tools"}}},
             {"cape", {"cape", "/keɪp/", "noun", "der Umhang (m)", "Oxford / Wiktionary",
-                       "A sleeveless cloak worn loosely over the shoulders.", "der Umhang, das Cape"}},
-            {"hat", {"hat", "/hæt/", "noun", "der Hut (m)", "Oxford / Wiktionary",
-                      "A shaped covering for the head worn for warmth or protection.", "der Hut (pl. die Huete)"}},
-            {"goggles", {"goggles", "/ˈɡɒɡlz/", "noun", "die Schutzbrille (f)", "Oxford / Wiktionary",
-                          "Close-fitting protective eyewear with side shields.", "die Schutzbrille"}},
+                       "A sleeveless cloak worn loosely over the shoulders.", "der Umhang, das Cape",
+                       {"cloak", "mantle", "shawl"}}},
             {"city", {"city", "/ˈsɪti/", "noun", "die Stadt (f)", "WordNet / Duden",
-                       "A large urban municipality or metropolitan center.", "die Stadt (pl. die Staedte)"}},
+                       "A large urban municipality or metropolitan center.", "die Stadt (pl. die Staedte)",
+                       {"town", "metropolis", "municipality"}}},
             {"protect", {"protect", "/prəˈtɛkt/", "verb", "", "Oxford / Wiktionary",
-                          "Keep safe from harm, injury, or damage.", "schuetzen, beschuetzen"}},
-            {"nightfall", {"nightfall", "/ˈnaɪtfɔːl/", "noun", "der Einbruch der Dunkelheit (m)", "Oxford / Wiktionary",
-                            "The onset of evening or darkness.", "der Einbruch der Dunkelheit"}},
-            {"trick", {"trick", "/trɪk/", "noun", "die Taeuschung (f)", "Wiktionary",
-                        "An optical illusion, deception, or clever act.", "die Taeuschung, der Trick"}},
+                          "Keep safe from harm, injury, or damage.", "schuetzen, beschuetzen",
+                          {"defend", "guard", "shield"}}},
             {"light", {"light", "/laɪt/", "noun", "das Licht (n)", "WordNet / Duden",
-                        "Natural or artificial illumination that makes things visible.", "das Licht (pl. die Lichter)"}},
+                        "Natural or artificial illumination that makes things visible.", "das Licht (pl. die Lichter)",
+                        {"lantern", "glow", "illumination"}}},
             {"investigate", {"investigate", "/ɪnˈvɛstɪɡeɪt/", "verb", "", "Cambridge / Wiktionary",
-                              "Carry out a systematic or formal inquiry to discover and examine the facts.", "untersuchen, ermitteln"}},
+                              "Carry out a systematic or formal inquiry to discover and examine the facts.", "untersuchen, ermitteln",
+                              {"examine", "explore", "probe"}}},
+            {"hat", {"hat", "/hæt/", "noun", "der Hut (m)", "Oxford / Wiktionary",
+                      "A shaped covering for the head worn for warmth or protection.", "der Hut (pl. die Huete)",
+                      {"cap", "helmet", "lid"}}},
+            {"goggles", {"goggles", "/ˈɡɒɡlz/", "noun", "die Schutzbrille (f)", "Oxford / Wiktionary",
+                          "Close-fitting protective eyewear with side shields.", "die Schutzbrille",
+                          {"glasses", "shades", "visor"}}},
+            {"nightfall", {"nightfall", "/ˈnaɪtfɔːl/", "noun", "der Einbruch der Dunkelheit (m)", "Oxford / Wiktionary",
+                            "The onset of evening or darkness.", "der Einbruch der Dunkelheit",
+                            {"dusk", "twilight", "sundown"}}},
+            {"trick", {"trick", "/trɪk/", "noun", "die Taeuschung (f)", "Wiktionary",
+                        "An optical illusion, deception, or clever act.", "die Taeuschung, der Trick",
+                        {"ruse", "ploy", "illusion"}}},
             {"facility", {"facility", "/fəˈsɪlɪti/", "noun", "die Anlage (f)", "Oxford / Wiktionary",
-                           "A building, place, or piece of equipment provided for a particular purpose.", "die Anlage, die Einrichtung"}},
+                           "A building, place, or piece of equipment provided for a particular purpose.", "die Anlage, die Einrichtung",
+                           {"installation", "complex", "plant"}}},
             {"fledermaus", {"die Fledermaus", "", "Substantiv", "Feminin (die)", "Duden / Wiktionary",
                              "Nachtaktives fliegendes Saeugetier.", "bat"}}
         };
@@ -1613,6 +1630,35 @@ public:
                 e.translation = v.get_str("translation");
                 e.pos = v.get_str("pos");
                 e.source = v.get_str("source", entry.path().stem().string());
+                // Structured synonyms array
+                if (auto* sy = v.find("synonyms"); sy && sy->type == MiniJson::Arr) {
+                    for (const auto& s : sy->arr) {
+                        if (s.type == MiniJson::Str && !s.str.empty()) e.synonyms.push_back(s.str);
+                    }
+                }
+                // Fallback: "Synonyms: a, b, c" sentence inside the notes field
+                if (e.synonyms.empty()) {
+                    std::string notes = v.get_str("notes");
+                    size_t p = notes.find("Synonyms:");
+                    if (p != std::string::npos) {
+                        std::string rest = notes.substr(p + 9);
+                        size_t stop = rest.find_first_of(".;");
+                        if (stop != std::string::npos) rest = rest.substr(0, stop);
+                        size_t start = 0;
+                        for (;;) {
+                            size_t comma = rest.find(',', start);
+                            std::string piece = rest.substr(start, (comma == std::string::npos) ? std::string::npos : comma - start);
+                            size_t a = piece.find_first_not_of(" \t");
+                            size_t b = piece.find_last_not_of(" \t");
+                            if (a != std::string::npos && b != std::string::npos) {
+                                std::string w = piece.substr(a, b - a + 1);
+                                if (!w.empty()) e.synonyms.push_back(w);
+                            }
+                            if (comma == std::string::npos) break;
+                            start = comma + 1;
+                        }
+                    }
+                }
                 if (!e.word.empty()) {
                     s_lexicon[e.word] = e;
                 }

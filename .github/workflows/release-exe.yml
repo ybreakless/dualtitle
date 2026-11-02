@@ -23,7 +23,7 @@ jobs:
         shell: cmd
         run: |
           rc /fo src\DualTitle.res src\DualTitle.rc
-          cl /std:c++17 /O2 /EHsc /Fe:DualTitle_Native.exe src\DualTitle.cpp src\DualTitle.res user32.lib gdi32.lib shell32.lib comdlg32.lib
+          cl /std:c++17 /O2 /EHsc /Fe:DualTitle_Native.exe src\DualTitle.cpp src\DualTitle.res user32.lib gdi32.lib shell32.lib comdlg32.lib gdiplus.lib uxtheme.lib winmm.lib
 
       - name: Run Automated C++17 & Python Verification Suites
         shell: cmd
@@ -53,12 +53,12 @@ jobs:
             RestoreSave.exe
             DualTitle-Windows-x64.zip
 
-      - name: Create or Update Official GitHub Release (v4.1.0)
+      - name: Create or Update Official GitHub Release (v5.1.0)
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v4.1.0
-          name: "DualTitle v4.1.0 — Universal Anti-Cheat-Safe Edition (Windows x64)"
-          body_path: RELEASE_NOTES_v4.1.0.md
+          tag_name: v5.1.0
+          name: "DualTitle v5.1.0 — In-Game Word Inspector Edition (Windows x64)"
+          body_path: RELEASE_NOTES_v5.1.0.md
           draft: false
           prerelease: false
           files: |
