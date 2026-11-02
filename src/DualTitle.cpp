@@ -671,22 +671,27 @@ public:
             ConfigPatcher::ApplyGameConfig(gdir, a_lang, p_lang, profile, log_ss);
             SetStatus(hwnd, L"Safe pre-game audio/subtitle config applied (saves backed up automatically).", ToneOk);
         } else if (id == ID_BTN_OVERLAY_ONLY) {
+            int idx_ov = static_cast<int>(SendMessageW(hComboGame, CB_GETCURSEL, 0, 0));
+            const GameProfile* profile_ov = (idx_ov >= 0 && static_cast<size_t>(idx_ov) < games_list.size())
+                ? MatchGameProfile(games_list[static_cast<size_t>(idx_ov)].title) : nullptr;
             SetStatus(hwnd, L"Overlay HUD running -- return to your game and press ALT+F8 to hide/show.", ToneInfo);
             ShowWindow(hwnd, SW_MINIMIZE);
-            Win32UniversalOverlay::RunOverlayLoop(gdir, p_lang, s_lang, spd, cfg);
+            Win32UniversalOverlay::RunOverlayLoop(gdir, p_lang, s_lang, spd, cfg, profile_ov);
             SetStatus(hwnd, L"Overlay session ended.", ToneInfo);
         } else if (id == ID_BTN_LAUNCH_ALL) {
             std::ostringstream log_ss;
-            // 1. Back up saves and clean any foreign files so anti-cheat is 100% happy
-            SaveBackupManager::BackupSaves(gdir, log_ss);
-            EmergencyGameRepair::RepairGameDirectory(gdir, log_ss, false); // dry_run=false for actual launch
-            ConfigPatcher::ApplyGameConfig(gdir, a_lang, p_lang, nullptr, log_ss);
-
-            // 2. Launch the game -- prefer Steam/EA deep link if profile has one
+            // Match the game profile first: it drives the safe pre-game config
+            // AND the read-only subtitle extraction inside the overlay.
             int idx = static_cast<int>(SendMessageW(hComboGame, CB_GETCURSEL, 0, 0));
             const GameProfile* profile = (idx >= 0 && static_cast<size_t>(idx) < games_list.size())
                 ? MatchGameProfile(games_list[static_cast<size_t>(idx)].title) : nullptr;
 
+            // 1. Back up saves and clean any foreign files so anti-cheat is 100% happy
+            SaveBackupManager::BackupSaves(gdir, log_ss);
+            EmergencyGameRepair::RepairGameDirectory(gdir, log_ss, false); // dry_run=false for actual launch
+            ConfigPatcher::ApplyGameConfig(gdir, a_lang, p_lang, profile, log_ss);
+
+            // 2. Launch the game -- prefer Steam/EA deep link if profile has one
             bool launched = false;
             if (profile && !profile->steam_appid.empty()) {
                 std::wstring steam_url = L"steam://rungameid/" + Win32UniversalOverlay::Utf8ToWide(profile->steam_appid);
@@ -710,7 +715,7 @@ public:
 
             // 3. Minimize control panel and start the Anti-Cheat-Safe In-Game Overlay HUD
             ShowWindow(hwnd, SW_MINIMIZE);
-            Win32UniversalOverlay::RunOverlayLoop(gdir, p_lang, s_lang, spd, cfg);
+            Win32UniversalOverlay::RunOverlayLoop(gdir, p_lang, s_lang, spd, cfg, profile);
             SetStatus(hwnd, L"Overlay session ended.", ToneInfo);
         }
     }

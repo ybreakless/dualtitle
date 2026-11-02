@@ -695,7 +695,19 @@ public:
                 auto s = [&](int v) { return Theme::S(v, hud_dpi); };
 
                 // Outer card -- rounded, translucent charcoal w/ hairline border
-                Theme::RoundRectFill(hdc, rc, s(14), Theme::Inner, 238, RGB(36, 42, 56), 210);
+                // Subtitle style preset: 0 = aurora, 1 = mimic_frostbite, 2 = classic_console
+                int style = 0;
+                if (cfg.subtitle_style == "mimic_frostbite") style = 1;
+                else if (cfg.subtitle_style == "classic_console") style = 2;
+                if (style == 1) {
+                    // Frostbite look: flat near-black band, no rounded card sheen
+                    Theme::RoundRectFill(hdc, rc, s(2), RGB(8, 10, 14), 200, RGB(20, 24, 30), 220);
+                } else if (style == 2) {
+                    // Console look: deep black slab with a faint phosphor border
+                    Theme::RoundRectFill(hdc, rc, s(2), RGB(0, 6, 0), 225, RGB(40, 160, 60), 150);
+                } else {
+                    Theme::RoundRectFill(hdc, rc, s(14), Theme::Inner, 238, RGB(36, 42, 56), 210);
+                }
 
                 // Header: logo + wordmark + progress
                 DrawDualTitleMiniLogo(hdc, s(10), s(8), s(24));
@@ -762,9 +774,20 @@ public:
                         SelectObject(hdc, old);
                     };
 
-                    // Top line -- primary subtitle in gold; bottom line -- secondary in ice-white
-                    draw_clickable_sentence(item.primary, s(40), s(74), hFontPrimary, Theme::Gold, true);
-                    draw_clickable_sentence(item.secondary, s(78), s(108), hFontSecondary, Theme::IceWhite, false);
+                    // Style palette: aurora gold/ice, frostbite white/gray, console green/amber
+                    COLORREF prim_col = Theme::Gold;
+                    COLORREF sec_col = Theme::IceWhite;
+                    if (style == 1) {
+                        prim_col = RGB(242, 244, 246);
+                        sec_col = RGB(186, 194, 204);
+                    } else if (style == 2) {
+                        prim_col = RGB(120, 255, 160);
+                        sec_col = RGB(255, 200, 96);
+                    }
+
+                    // Top line -- primary subtitle; bottom line -- secondary
+                    draw_clickable_sentence(item.primary, s(40), s(74), hFontPrimary, prim_col, true);
+                    draw_clickable_sentence(item.secondary, s(78), s(108), hFontSecondary, sec_col, false);
 
                     // Hover highlight: pill under the hovered word, text redrawn on top
                     if (hovered_word >= 0 && hovered_word < static_cast<int>(word_boxes.size())) {
@@ -774,7 +797,7 @@ public:
                         HFONT hHover = wb.is_primary ? hFontHoverPrimary : hFontHoverSecondary;
                         HFONT old_h = static_cast<HFONT>(SelectObject(hdc, hHover));
                         SetBkMode(hdc, TRANSPARENT);
-                        SetTextColor(hdc, wb.is_primary ? Theme::Gold : Theme::IceWhite);
+                        SetTextColor(hdc, wb.is_primary ? prim_col : sec_col);
                         std::wstring wt = Utf8ToWide(wb.word);
                         RECT wrc_copy{wb.rc.left, wb.rc.top, wb.rc.right, wb.rc.bottom};
                         DrawTextW(hdc, wt.c_str(), -1, &wrc_copy, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
@@ -926,7 +949,8 @@ public:
         const std::string& secondary_lang = "de",
         double initial_speed = 1.0,
         const DualTitle::DualTitleConfig::AppConfig& cfg_in =
-            DualTitle::DualTitleConfig::AppConfig{}
+            DualTitle::DualTitleConfig::AppConfig{},
+        const GameProfile* profile = nullptr
     ) {
         Theme::EnablePerMonitorDpi();
         Theme::BootGdiplus();
@@ -943,7 +967,9 @@ public:
         active_game_dir = game_dir;
         playback_speed = (initial_speed == 1.0 && cfg.playback_speed != 1.0)
                             ? cfg.playback_speed : initial_speed;
-        active_lines = SubtitleMerger::IndexGameSubtitlesReadOnly(game_dir, primary_lang, secondary_lang);
+        active_lines = SubtitleMerger::IndexGameSubtitlesReadOnly(
+            game_dir, primary_lang, secondary_lang,
+            game_dir.empty() ? nullptr : profile, &std::cout);
         current_line_idx = 0;
         hovered_word = -1;
         reveal_active = false;
