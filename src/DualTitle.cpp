@@ -1377,7 +1377,8 @@ int main(int argc, char* argv[]) {
             return 0;
         } else if (arg == "--overlay") {
 #ifdef _WIN32
-            return Win32UniversalOverlay::RunOverlayLoop();
+            auto overlay_cfg = DualTitle::DualTitleConfig::LoadOrCreate();
+            return Win32UniversalOverlay::RunOverlayLoop("", "en", "de", 1.0, overlay_cfg);
 #else
             std::cout << "Win32 Overlay requires Windows.\n";
             return 0;

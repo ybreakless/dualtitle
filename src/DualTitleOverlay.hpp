@@ -15,6 +15,8 @@
  */
 
 #include "DualTitleEngine.hpp"
+#include "DualTitleConfig.hpp"
+#include "DualTitleDictService.hpp"
 #include "DualTitleTheme.hpp"
 
 #ifdef _WIN32
@@ -54,7 +56,7 @@ public:
     static inline bool auto_play_enabled = false;
     static inline double playback_speed = 1.0; // 0.25x .. 2.0x
     static inline std::wstring status_dictionary_text =
-        L"Click any word in the subtitles to see its meaning, phonetics & grammar notes.";
+        L"Hold the Reveal key and hover any subtitle word for meaning, job & synonyms.";
     static inline std::vector<ClickableWordBox> word_boxes;
     static inline std::vector<Theme::FlatBtn> control_buttons;
     static inline std::map<int, Theme::BtnState> ctrl_state;
@@ -70,6 +72,16 @@ public:
     static inline int hovered_word = -1;
     static inline bool mouse_tracking = false;
     static inline bool game_is_exclusive_fs = false;
+    // Remap config + hold-to-reveal dict card state
+    static inline DualTitle::DualTitleConfig::AppConfig cfg;
+    static inline std::map<int, std::string> hotkey_slots;   // slot id -> action
+    static inline bool reveal_active = false;                // reveal_words key held
+    static inline DWORD hover_dwell_start_ms = 0;
+    static inline int card_req = 0;
+    static inline bool card_loaded = false;
+    static inline DictSvc::DictResult card_result;
+    static inline std::wstring card_word;
+    static inline std::wstring card_status_line;             // short bottom-bar echo
 
     enum ButtonId {
         BTN_PREV = 1,
@@ -114,6 +126,77 @@ public:
         if (hFontDict) { DeleteObject(hFontDict); hFontDict = nullptr; }
     }
 
+    // ---- Remap helpers -------------------------------------------------------
+
+    /** Converts a config key name (e.g. "F9", "ESC", "P") to a virtual key code. */
+    static WORD KeyNameToVk(const std::string& name_in) {
+        std::string k = DualTitle::DualTitleConfig::NormalizeKey(name_in);
+        if (k.size() == 1 && k[0] >= 'A' && k[0] <= 'Z')
+            return static_cast<WORD>('A' + (k[0] - 'A'));
+        if (k.size() == 1 && k[0] >= '0' && k[0] <= '9')
+            return static_cast<WORD>('0' + (k[0] - '0'));
+        struct Pair { const char* name; WORD vk; };
+        static const Pair pairs[] = {
+            {"ESC", VK_ESCAPE}, {"F1", VK_F1}, {"F2", VK_F2}, {"F3", VK_F3},
+            {"F4", VK_F4}, {"F5", VK_F5}, {"F6", VK_F6}, {"F7", VK_F7},
+            {"F8", VK_F8}, {"F9", VK_F9}, {"F10", VK_F10}, {"F11", VK_F11}, {"F12", VK_F12},
+            {"SPACE", VK_SPACE}, {"ENTER", VK_RETURN}, {"TAB", VK_TAB},
+            {"CAPSLOCK", VK_CAPITAL}, {"LEFT", VK_LEFT}, {"RIGHT", VK_RIGHT},
+            {"UP", VK_UP}, {"DOWN", VK_DOWN}, {"PGUP", VK_PRIOR}, {"PGDN", VK_NEXT},
+            {"HOME", VK_HOME}, {"END", VK_END}, {"INSERT", VK_INSERT},
+            {"DELETE", VK_DELETE}, {"BACKSPACE", VK_BACK},
+            {"PRINTSCREEN", VK_SNAPSHOT}, {"SCROLLLOCK", VK_SCROLL},
+        };
+        for (const auto& p : pairs) if (k == p.name) return p.vk;
+        return 0;
+    }
+
+    /** Convenience: display string of a binding (e.g. "ALT+F9") for the UI. */
+    static std::wstring ActionKeyLabel(const std::string& action) {
+        const auto* b = DualTitle::DualTitleConfig::FindBinding(cfg, action);
+        if (!b || b->key.empty()) return L"?";
+        std::wstring out;
+        if (b->ctrl) out += L"CTRL+";
+        if (b->alt)  out += L"ALT+";
+        if (b->shift) out += L"SHIFT+";
+        std::string kk = DualTitle::DualTitleConfig::NormalizeKey(b->key);
+        return out + Utf8ToWide(kk);
+    }
+
+    /** Registers every configured hotkey on its own slot (except reveal_words,
+     *  which is polled via GetKeyState instead of RegisterHotKey). */
+    static bool ApplyHotkeys(HWND hwnd) {
+        for (const auto& kv : hotkey_slots) UnregisterHotKey(hwnd, static_cast<int>(kv.first));
+        hotkey_slots.clear();
+        int slot = 101;
+        bool any_ok = false;
+        for (const auto& h : cfg.hotkeys) {
+            if (h.action == "reveal_words") continue;
+            WORD vk = KeyNameToVk(h.key);
+            if (!vk) continue;
+            UINT mods = 0;
+            if (h.ctrl) mods |= MOD_CONTROL;
+            if (h.alt)  mods |= MOD_ALT;
+            if (h.shift) mods |= MOD_SHIFT;
+            if (RegisterHotKey(hwnd, slot, mods, vk)) {
+                hotkey_slots[slot] = h.action;
+                any_ok = true;
+            }
+            ++slot;
+            if (slot > 130) break;   // hard cap on global hotkeys
+        }
+        return any_ok;
+    }
+
+    /** The persisted key hold-to-reveal is bound to (polled, 0 disables). */
+    static WORD RevealVk() {
+        const auto* b = DualTitle::DualTitleConfig::FindBinding(cfg, "reveal_words");
+        if (!b || b->key.empty()) return 0;
+        // Plain keys only when unmodified (modifiers reserved for hotkeys).
+        if (b->ctrl || b->alt || b->shift) return 0;
+        return KeyNameToVk(b->key);
+    }
+
     // Static string helpers to avoid parser issues with wide string literals in WM_PAINT
     static const wchar_t* Str_DualTitle() { return L"DUALTITLE"; }
     static const wchar_t* Str_NoSubtitleData() { return L"No subtitle data found -- import .srt or configure a Game Profile"; }
@@ -143,25 +226,174 @@ public:
     }
 
     /**
-     * Anti-Cheat-Safe Game Pause: Sends a standard keyboard VK_ESCAPE / VK_PAUSE
-     * input to the active game window without opening a process handle (`OpenProcess`).
+     * Anti-Cheat-Safe Game Pause: sends the USER-MAPPED pause key to the active
+     * game window without opening a process handle (SendInput only, no hooks).
      */
     static void SendSafeGamePause(HWND overlay_hwnd) {
         RememberForegroundGameWindow(overlay_hwnd);
-        if (last_game_hwnd && IsWindow(last_game_hwnd)) {
-            SetForegroundWindow(last_game_hwnd);
-            INPUT inputs[2] = {};
-            inputs[0].type = INPUT_KEYBOARD;
-            inputs[0].ki.wVk = VK_ESCAPE;
-            inputs[1].type = INPUT_KEYBOARD;
-            inputs[1].ki.wVk = VK_ESCAPE;
-            inputs[1].ki.dwFlags = KEYEVENTF_KEYUP;
-            SendInput(2, inputs, sizeof(INPUT));
-            status_dictionary_text = L"Pause (ESC) sent to the running window -- zero process hooks used.";
+        if (!(last_game_hwnd && IsWindow(last_game_hwnd))) {
+            status_dictionary_text = L"Switch to your running application window first, then use Pause Game.";
+            return;
+        }
+        const auto* b = DualTitle::DualTitleConfig::FindBinding(cfg, "pause_game");
+        std::string key_name = (b && !b->key.empty()) ? b->key : "ESC";
+        WORD vk = KeyNameToVk(key_name);
+        if (!vk) vk = VK_ESCAPE;
+        SetForegroundWindow(last_game_hwnd);
+        // Modifier keys wrap the pause key (only those configured for it).
+        std::vector<WORD> down, up;
+        const auto* bb = DualTitle::DualTitleConfig::FindBinding(cfg, "pause_game");
+        if (bb && bb->ctrl) { down.push_back(VK_CONTROL); up.push_back(VK_CONTROL); }
+        if (bb && bb->alt)  { down.push_back(VK_MENU);    up.push_back(VK_MENU); }
+        if (bb && bb->shift){ down.push_back(VK_SHIFT);   up.push_back(VK_SHIFT); }
+        up.push_back(vk);  // key-down then key-up
+        std::vector<INPUT> inputs;
+        for (WORD m : down) {
+            INPUT i{}; i.type = INPUT_KEYBOARD; i.ki.wVk = m; inputs.push_back(i);
+        }
+        INPUT kd{}; kd.type = INPUT_KEYBOARD; kd.ki.wVk = vk; inputs.push_back(kd);
+        INPUT ku{}; ku.type = INPUT_KEYBOARD; ku.ki.wVk = vk; ku.ki.dwFlags = KEYEVENTF_KEYUP; inputs.push_back(ku);
+        // Release modifiers in reverse order.
+        for (auto rit = up.rbegin(); rit != up.rend(); ++rit) {
+            INPUT i{}; i.type = INPUT_KEYBOARD; i.ki.wVk = *rit; i.ki.dwFlags = KEYEVENTF_KEYUP; inputs.push_back(i);
+        }
+        // Order: modifiers down, pause key down/up, modifiers up (reversed).
+        SendInput(static_cast<UINT>(inputs.size()), inputs.data(), sizeof(INPUT));
+        status_dictionary_text = L"Pause key (" + Utf8ToWide(
+            DualTitle::DualTitleConfig::NormalizeKey(key_name)) + L") sent to the running window -- zero process hooks used.";
+    }
+
+    /** Pause Subtitles: freezes/unfreezes auto-advance cadence only (game untouched). */
+    static void ToggleSubtitlePause(HWND hwnd) {
+        auto_play_enabled = !auto_play_enabled;
+        UpdateSpeedTimer(hwnd);
+        status_dictionary_text = auto_play_enabled
+            ? L"Subtitles auto-advance resumed."
+            : L"Subtitles paused -- cadence frozen (game untouched).";
+        InvalidateRect(hwnd, nullptr, TRUE);
+    }
+
+    // ---- Hold-to-reveal dictionary card --------------------------------------
+
+    static const ClickableWordBox* WordAt(const POINT& pt) {
+        for (const auto& wb : word_boxes) {
+            if (PtInRect(&wb.rc, pt)) return &wb;
+        }
+        return nullptr;
+    }
+
+    static void ClearDictCard(HWND hwnd) {
+        card_req = 0;
+        card_loaded = false;
+        card_result = DictSvc::DictResult{};
+        card_word.clear();
+        card_status_line.clear();
+        DictSvc::SetCardVisible(false);
+        DictSvc::SetActiveRequest(0);
+        InvalidateRect(hwnd, nullptr, TRUE);
+    }
+
+    /** Kicks off an async lookup; the popup card appears once Pump() delivers. */
+    static void StartWordLookup(HWND hwnd, const ClickableWordBox& wb) {
+        card_req = DictSvc::BeginRequest();
+        card_word = Utf8ToWide(wb.word);
+        card_loaded = false;
+        card_result = DictSvc::DictResult{};
+        card_status_line = L"Looking up '" + card_word + L"' ...";
+        DictSvc::Query(wb.word, card_req);
+        InvalidateRect(hwnd, nullptr, TRUE);
+    }
+
+    /** Enters/leaves reveal mode: toggles click-through so words become live. */
+    static void OnRevealChanged(HWND hwnd, bool active) {
+        reveal_active = active;
+        LONG_PTR ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        if (active) {
+            ex &= ~static_cast<LONG_PTR>(WS_EX_TRANSPARENT);
+            status_dictionary_text = L"Reveal mode: hover a word to inspect it.";
         } else {
-            status_dictionary_text = L"Switch to your running application window first, then click Pause or press ALT+F9.";
+            ex |= WS_EX_TRANSPARENT;
+            ClearDictCard(hwnd);
+        }
+        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex);
+        InvalidateRect(hwnd, nullptr, TRUE);
+    }
+
+    /** Tracks WM_MOUSEMOVE-like hover state from an arbitrary point (client coords). */
+    static void UpdateHoverFromPoint(HWND hwnd, const POINT& pt_client) {
+        int new_hover = -1;
+        for (size_t i = 0; i < word_boxes.size(); ++i) {
+            if (PtInRect(&word_boxes[i].rc, pt_client)) {
+                new_hover = static_cast<int>(i);
+                break;
+            }
+        }
+        if (new_hover != hovered_word) {
+            if (hovered_word >= 0 && hovered_word < static_cast<int>(word_boxes.size())) {
+                InvalidateRect(hwnd, &word_boxes[static_cast<size_t>(hovered_word)].rc, TRUE);
+            }
+            hovered_word = new_hover;
+            if (hovered_word >= 0) {
+                InvalidateRect(hwnd, &word_boxes[static_cast<size_t>(hovered_word)].rc, TRUE);
+                hover_dwell_start_ms = GetTickCount();
+            }
         }
     }
+
+    /** 16 ms fast tick: reveal-key polling, hover tracking, dwell + card pump. */
+    static void PollRevealAndCard(HWND hwnd) {
+        // 1) Hold-key state (polled; works even when the game window has focus)
+        WORD rvk = RevealVk();
+        bool want_reveal = false;
+        if (rvk && !active_lines.empty()) {
+            want_reveal = (GetKeyState(static_cast<int>(rvk)) & 0x8000) != 0;
+        }
+        if (want_reveal != reveal_active) OnRevealChanged(hwnd, want_reveal);
+
+        // Pump async dictionary results (stale requests are dropped)
+        DictSvc::DictResult r;
+        while (DictSvc::Pump(r)) {
+            if (r.req == card_req && DictSvc::CardVisible()) {
+                card_result = r;
+                card_loaded = true;
+                std::wostringstream ss;
+                ss << Utf8ToWide(r.entry.word);
+                if (!r.entry.phonetic.empty()) ss << L"  " << Utf8ToWide(r.entry.phonetic);
+                card_status_line = ss.str();
+                if (r.found) {
+                    if (!r.entry.pos.empty())
+                        card_status_line += L"  [" + Utf8ToWide(r.entry.pos) + L"]";
+                    card_status_line += L"  --  " + Utf8ToWide(r.entry.definition);
+                } else {
+                    card_status_line = L"No dictionary entry for '" + card_word + L"' (offline lexicon)";
+                }
+                InvalidateRect(hwnd, nullptr, TRUE);
+            }
+        }
+
+        // 2) Hover tracking while reveal is held (pointer may be over the game)
+        if (!reveal_active) return;
+        DWORD now = GetTickCount();
+        if (rvk) {
+            POINT pt{};
+            GetCursorPos(&pt);
+            ScreenToClient(hwnd, &pt);
+            RECT rc;
+            GetClientRect(hwnd, &rc);
+            if (PtInRect(&rc, pt)) {
+                UpdateHoverFromPoint(hwnd, pt);
+                if (hovered_word >= 0 &&
+                    hover_dwell_start_ms != 0 &&
+                    now - hover_dwell_start_ms >= static_cast<DWORD>(std::max(0, cfg.hover_dwell_ms))) {
+                    const auto& wb = word_boxes[static_cast<size_t>(hovered_word)];
+                    if (!DictSvc::CardVisible() || card_word != Utf8ToWide(wb.word)) {
+                        StartWordLookup(hwnd, wb);
+                    }
+                }
+            }
+        }
+    }
+
 
     /**
      * Converts the target application window to Borderless Fullscreen so the overlay
@@ -190,18 +422,6 @@ public:
             UINT interval_ms = static_cast<UINT>(3600.0 / std::max(0.25, playback_speed));
             SetTimer(hwnd, 201, interval_ms, nullptr);
         }
-    }
-
-    static void LookupAndShowWord(const std::string& word) {
-        auto info = FamousDictionary::Lookup(word);
-        std::ostringstream ss;
-        ss << info.word;
-        if (!info.phonetic.empty()) ss << "  " << info.phonetic;
-        if (!info.gender.empty()) ss << "  .  " << info.gender;
-        else if (!info.pos.empty()) ss << "  .  " << info.pos;
-        if (!info.translation.empty()) ss << "  ->  " << info.translation;
-        if (!info.definition.empty()) ss << "  --  " << info.definition;
-        status_dictionary_text = Utf8ToWide(ss.str());
     }
 
     static void DrawDualTitleMiniLogo(HDC hdc, int x, int y, int size) {
@@ -234,17 +454,19 @@ public:
         double spd_f = playback_speed;
         wchar_t spd_lbl[16];
         swprintf(spd_lbl, 16, L"%.2fx", spd_f);
+        std::wstring pause_game_lbl = L"Pause Game";
+        std::wstring pause_subs_lbl = auto_play_enabled ? L"Pause Subs" : L"Resume Subs";
 
-        struct Spec { int id; const wchar_t* label; int w; Theme::BtnKind kind; };
+        struct Spec { int id; std::wstring label; int w; Theme::BtnKind kind; };
         Spec specs[] = {
             {BTN_RESTORE_SAVE, L"Restore", s(64), Theme::BtnTeal},
             {BTN_BORDERLESS,  L"Borderless", s(80), Theme::BtnGhost},
-            {BTN_GAME_PAUSE,  L"Pause (ESC)", s(90), Theme::BtnGhost},
+            {BTN_GAME_PAUSE,  pause_game_lbl, s(102), Theme::BtnGhost},
+            {BTN_PLAY_PAUSE,  pause_subs_lbl, s(96), Theme::BtnGhost},
             {BTN_SPEED_UP,    L"+", s(26), Theme::BtnGhost},
             {BTN_SPEED_RESET, spd_lbl, s(60), Theme::BtnGhost},
             {BTN_SPEED_DOWN,  L"-", s(26), Theme::BtnGhost},
             {BTN_NEXT,        L"Next >", s(58), Theme::BtnGhost},
-            {BTN_PLAY_PAUSE,  L"Auto", s(56), Theme::BtnGhost},
             {BTN_PREV,        L"< Prev", s(54), Theme::BtnGhost},
             {BTN_CLOSE,       L"x", s(26), Theme::BtnDanger}
         };
@@ -253,7 +475,7 @@ public:
             control_buttons.push_back({sp.id, br, sp.label, sp.kind});
             x -= sp.w + s(6);
         }
-        // Auto toggle attributes live on the matched button
+        // Toggle attributes live on the matched buttons
         for (auto& b : control_buttons) {
             if (b.id == BTN_PLAY_PAUSE) { b.is_toggle = true; b.toggle_on = auto_play_enabled; }
             if (b.id == BTN_SPEED_RESET) b.text_override = Theme::Gold;
@@ -287,9 +509,15 @@ public:
                         SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0,
                                      SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
                     }
+                    // Fast poll for reveal-mode hover (runs every 300 ms as a
+                    // fallback so the card works even if timer 202 is starved)
+                    PollRevealAndCard(hwnd);
                 } else if (wparam == 201 && auto_play_enabled && !active_lines.empty()) {
                     current_line_idx = (current_line_idx + 1) % active_lines.size();
                     InvalidateRect(hwnd, nullptr, TRUE);
+                } else if (wparam == 202) {
+                    // 16 ms fast tick: reveal key + hover dwell + async card
+                    PollRevealAndCard(hwnd);
                 }
                 return 0;
 
@@ -306,22 +534,7 @@ public:
                     }
                 }
                 // Word hover tracking
-                int new_hover = -1;
-                for (size_t i = 0; i < word_boxes.size(); ++i) {
-                    if (PtInRect(&word_boxes[i].rc, pt)) {
-                        new_hover = static_cast<int>(i);
-                        break;
-                    }
-                }
-                if (new_hover != hovered_word) {
-                    if (hovered_word >= 0 && hovered_word < static_cast<int>(word_boxes.size())) {
-                        InvalidateRect(hwnd, &word_boxes[static_cast<size_t>(hovered_word)].rc, TRUE);
-                    }
-                    hovered_word = new_hover;
-                    if (hovered_word >= 0) {
-                        InvalidateRect(hwnd, &word_boxes[static_cast<size_t>(hovered_word)].rc, TRUE);
-                    }
-                }
+                UpdateHoverFromPoint(hwnd, pt);
                 return 0;
             }
 
@@ -343,8 +556,10 @@ public:
                     ScreenToClient(hwnd, &pt);
                     BuildControlButtons(hwnd);
                     bool hand = HitControlButton(pt) != nullptr;
-                    for (const auto& wb : word_boxes) {
-                        if (PtInRect(&wb.rc, pt)) { hand = true; break; }
+                    if (reveal_active) {
+                        for (const auto& wb : word_boxes) {
+                            if (PtInRect(&wb.rc, pt)) { hand = true; break; }
+                        }
                     }
                     SetCursor(LoadCursor(nullptr, hand ? IDC_HAND : IDC_ARROW));
                     return TRUE;
@@ -353,12 +568,18 @@ public:
             }
 
             case WM_NCHITTEST: {
-                // Make the control bar area clickable while body is transparent
+                // Control bar clickable; words clickable while reveal is held;
+                // body stays click-through otherwise (never blocks the game).
                 POINT pt{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
                 ScreenToClient(hwnd, &pt);
                 BuildControlButtons(hwnd);
                 for (const auto& b : control_buttons) {
                     if (PtInRect(&b.rc, pt)) return HTCLIENT;
+                }
+                if (reveal_active) {
+                    for (const auto& wb : word_boxes) {
+                        if (PtInRect(&wb.rc, pt)) return HTCLIENT;
+                    }
                 }
                 // Body is transparent to clicks
                 return HTTRANSPARENT;
@@ -367,21 +588,37 @@ public:
                 // Never steal keyboard focus from the running game when clicking overlay buttons/words!
                 return MA_NOACTIVATE;
 
-            case WM_HOTKEY:
-                if (wparam == 101) { // ALT + F9: Safe Game Pause
+            case WM_HOTKEY: {
+                auto it = hotkey_slots.find(static_cast<int>(wparam));
+                if (it == hotkey_slots.end()) return 0;
+                const std::string& action = it->second;
+                if (action == "pause_game") {
                     SendSafeGamePause(hwnd);
-                    InvalidateRect(hwnd, nullptr, TRUE);
-                } else if (wparam == 102 && !active_lines.empty()) { // ALT + F10: Next Line
+                } else if (action == "pause_subs") {
+                    ToggleSubtitlePause(hwnd);
+                } else if (action == "next_line" && !active_lines.empty()) {
                     current_line_idx = (current_line_idx + 1) % active_lines.size();
-                    InvalidateRect(hwnd, nullptr, TRUE);
-                } else if (wparam == 103) { // ALT + F8: Toggle Overlay Visibility
+                } else if (action == "prev_line" && !active_lines.empty()) {
+                    current_line_idx = (current_line_idx + active_lines.size() - 1) % active_lines.size();
+                } else if (action == "toggle_hud") {
                     overlay_visible = !overlay_visible;
                     ShowWindow(hwnd, overlay_visible ? SW_SHOWNOACTIVATE : SW_HIDE);
-                } else if (wparam == 104) { // ALT + F11: Force Borderless Window
+                } else if (action == "borderless") {
                     MakeTargetGameBorderless(hwnd);
-                    InvalidateRect(hwnd, nullptr, TRUE);
+                } else if (action == "speed_down") {
+                    playback_speed = std::max(0.25, playback_speed - 0.25);
+                    UpdateSpeedTimer(hwnd);
+                    status_dictionary_text = L"Speed: " + SpeedLabel();
+                } else if (action == "speed_up") {
+                    playback_speed = std::min(2.0, playback_speed + 0.25);
+                    UpdateSpeedTimer(hwnd);
+                    status_dictionary_text = L"Speed: " + SpeedLabel();
+                } else if (action == "toggle_dict") {
+                    if (DictSvc::CardVisible()) ClearDictCard(hwnd);
                 }
+                InvalidateRect(hwnd, nullptr, TRUE);
                 return 0;
+            }
 
             case WM_LBUTTONDOWN: {
                 POINT pt = {GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
@@ -401,11 +638,7 @@ public:
                             }
                             break;
                         case BTN_PLAY_PAUSE:
-                            auto_play_enabled = !auto_play_enabled;
-                            UpdateSpeedTimer(hwnd);
-                            status_dictionary_text = auto_play_enabled
-                                ? L"Auto-advance on -- subtitles move by themselves."
-                                : L"Auto-advance paused -- click any word to inspect it.";
+                            ToggleSubtitlePause(hwnd);
                             break;
                         case BTN_SPEED_DOWN:
                             playback_speed = std::max(0.25, playback_speed - 0.25);
@@ -446,8 +679,7 @@ public:
                 // 2. Words in the Primary or Secondary Subtitle Line
                 for (const auto& wb : word_boxes) {
                     if (PtInRect(&wb.rc, pt)) {
-                        LookupAndShowWord(wb.word);
-                        InvalidateRect(hwnd, nullptr, TRUE);
+                        StartWordLookup(hwnd, wb);
                         return 0;
                     }
                 }
@@ -548,6 +780,105 @@ public:
                         DrawTextW(hdc, wt.c_str(), -1, &wrc_copy, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
                         SelectObject(hdc, old_h);
                     }
+
+                    // Reveal-mode indicator: small pill top-right under the buttons row
+                    if (reveal_active) {
+                        RECT rev_rc{rc.right - s(120), s(32), rc.right - s(12), s(48)};
+                        Theme::RoundRectFill(hdc, rev_rc, s(5), Theme::Accent, 80);
+                        Theme::DrawLabel(hdc, (L"REVEAL (" + ActionKeyLabel("reveal_words") + L")").c_str(),
+                            rev_rc, hud_fonts.btn, Theme::IceWhite, 0, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
+                    }
+
+                    // ________________________
+                    // Dictionary popup card (hover/click a word while reveal held)
+                    if (DictSvc::CardVisible() && !card_word.empty()) {
+                        // Anchor next to the hovered word (falls back to center-top)
+                        const ClickableWordBox* anchor = nullptr;
+                        for (const auto& wb : word_boxes)
+                            if (Utf8ToWide(wb.word) == card_word) { anchor = &wb; break; }
+                        int ax = anchor ? anchor->rc.left : s(240);
+                        int ay = anchor ? anchor->rc.bottom + s(6) : s(48);
+
+                        // Compose card lines respecting user toggles
+                        struct Line { std::wstring text; COLORREF color; };
+                        std::vector<Line> lines;
+                        lines.push_back({card_word + (card_result.entry.phonetic.empty() && !card_loaded
+                                                ? L"   --  looking up..." : L""),
+                                         Theme::Gold});
+                        if (card_loaded) {
+                            const auto& e = card_result.entry;
+                            bool known = card_result.found;
+                            if (known) {
+                                std::wstring head;
+                                if (cfg.show_card_phonetics && !e.phonetic.empty())
+                                    head += Utf8ToWide(e.phonetic) + L"   ";
+                                if (cfg.show_card_pos && !e.pos.empty())
+                                    head += L"(" + Utf8ToWide(e.pos) + L")";
+                                if (!e.gender.empty()) head += L" " + Utf8ToWide(e.gender);
+                                if (!head.empty()) lines.push_back({head, Theme::DictText});
+                                if (cfg.show_card_translation && !e.translation.empty())
+                                    lines.push_back({L"Translation: " + Utf8ToWide(e.translation), Theme::IceWhite});
+                                if (cfg.show_card_definition && !e.definition.empty())
+                                    lines.push_back({Utf8ToWide(e.definition), Theme::TextMuted});
+                                if (cfg.show_card_synonyms && e.synonyms.size() > 0) {
+                                    std::wstring syn = L"Synonyms: ";
+                                    for (size_t i = 0; i < e.synonyms.size(); ++i) {
+                                        if (i) syn += L", ";
+                                        syn += Utf8ToWide(e.synonyms[i]);
+                                    }
+                                    lines.push_back({syn, Theme::Accent});
+                                }
+                                {
+                                    std::wstring src = Utf8ToWide(e.source);
+                                    if (!src.empty()) lines.push_back({L"Source: " + src, Theme::TextFaint});
+                                }
+                            } else {
+                                lines.push_back({L"No dictionary entry for this word.", Theme::TextFaint});
+                                lines.push_back({L"Try another word -- the offline lexicon is limited.", Theme::TextFaint});
+                            }
+                        }
+
+                        // Measure the tallest wrapped section to size the card
+                        int card_w = s(340);
+                        int card_h = s(34);                       // header + padding
+                        HFONT old_card = static_cast<HFONT>(SelectObject(hdc, hFontDict));
+                        std::vector<RECT> line_rects;
+                        for (const auto& ln : lines) {
+                            RECT probe{0, 0, card_w - s(28), s(1000)};
+                            DrawTextW(hdc, ln.text.c_str(), -1, &probe,
+                                      DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
+                            line_rects.push_back(probe);
+                            card_h += probe.bottom + s(4);
+                        }
+                        SelectObject(hdc, old_card);
+
+                        // Clamp into the client area
+                        RECT crc{ax, ay, ax + card_w, ay + card_h};
+                        if (crc.right > rc.right - s(8)) {
+                            int shift = crc.right - (rc.right - s(8));
+                            crc.left -= shift; crc.right -= shift;
+                        }
+                        if (crc.bottom > rc.bottom - s(8)) {
+                            int up = crc.bottom - (rc.bottom - s(8));
+                            crc.top -= up; crc.bottom -= up;
+                        }
+                        if (crc.top < s(8)) { crc.top = s(8); }
+
+                        Theme::RoundRectFill(hdc, crc, s(10), RGB(13, 17, 26), 250,
+                                             RGB(56, 130, 246), 160);
+                        int yy = crc.top + s(8);
+                        old_card = static_cast<HFONT>(SelectObject(hdc, hFontDict));
+                        SetBkMode(hdc, TRANSPARENT);
+                        for (size_t i = 0; i < lines.size(); ++i) {
+                            SetTextColor(hdc, lines[i].color);
+                            RECT tlr{crc.left + s(14), yy, crc.right - s(14),
+                                     yy + line_rects[i].bottom};
+                            DrawTextW(hdc, lines[i].text.c_str(), -1, &tlr,
+                                      DT_WORDBREAK | DT_NOPREFIX);
+                            yy += line_rects[i].bottom + s(4);
+                        }
+                        SelectObject(hdc, old_card);
+                    }
                 }
 
                 // M0.4: Exclusive fullscreen hint pill
@@ -575,6 +906,7 @@ public:
             }            case WM_DESTROY:
                 KillTimer(hwnd, 200);
                 KillTimer(hwnd, 201);
+                KillTimer(hwnd, 202);
                 Theme::DestroyFontSet(hud_fonts);
                 PostQuitMessage(0);
                 return 0;
@@ -592,10 +924,13 @@ public:
         const fs::path& game_dir = "",
         const std::string& primary_lang = "en",
         const std::string& secondary_lang = "de",
-        double initial_speed = 1.0
+        double initial_speed = 1.0,
+        const DualTitle::DualTitleConfig::AppConfig& cfg_in =
+            DualTitle::DualTitleConfig::AppConfig{}
     ) {
         Theme::EnablePerMonitorDpi();
         Theme::BootGdiplus();
+        cfg = cfg_in;
 
         // M0.6: Load dictionaries/*.json
         fs::path dict_dir = fs::path("dictionaries");
@@ -606,11 +941,15 @@ public:
         }
 
         active_game_dir = game_dir;
-        playback_speed = initial_speed;
+        playback_speed = (initial_speed == 1.0 && cfg.playback_speed != 1.0)
+                            ? cfg.playback_speed : initial_speed;
         active_lines = SubtitleMerger::IndexGameSubtitlesReadOnly(game_dir, primary_lang, secondary_lang);
         current_line_idx = 0;
         hovered_word = -1;
+        reveal_active = false;
+        card_req = 0; card_loaded = false; card_word.clear();
         game_is_exclusive_fs = false;
+        DictSvc::Start();
 
         HINSTANCE hInst = GetModuleHandleW(nullptr);
         const wchar_t* clsName = L"DualTitleAuroraOverlayV5";
@@ -649,17 +988,20 @@ public:
         ShowWindow(hwnd, SW_SHOWNOACTIVATE);
         UpdateWindow(hwnd);
 
-        RegisterHotKey(hwnd, 101, MOD_ALT, VK_F9);
-        RegisterHotKey(hwnd, 102, MOD_ALT, VK_F10);
-        RegisterHotKey(hwnd, 103, MOD_ALT, VK_F8);
-        RegisterHotKey(hwnd, 104, MOD_ALT, VK_F11);
+        // Remappable hotkeys + reveal poll timer + subtitle cadence from config
+        ApplyHotkeys(hwnd);
+        SetTimer(hwnd, 202, 16, nullptr);      // 16 ms fast tick: hover + reveal
+        auto_play_enabled = cfg.auto_play;
+        UpdateSpeedTimer(hwnd);
 
         std::cout << "  [DualTitle C++ Overlay] Aurora HUD active (100% Anti-Cheat Safe Out-of-Process)\n"
-                  << "    - Click ANY word on the HUD to see its translation & dictionary definition\n"
-                  << "    - [-] / [+] control subtitle speed (0.25x - 2.00x), [Auto] toggles cadence\n"
-                  << "    - [Restore] brings back saved progress anytime\n"
-                  << "    - [ALT + F9] Pause Game (ESC)   [ALT + F10] Next Line\n"
-                  << "    - [ALT + F11] Borderless        [ALT + F8]  Show/Hide HUD\n";
+                  << "    - HOLD " << DualTitle::DualTitleConfig::ActionLabel("reveal_words")
+                  << " key (" << (FindBinding(cfg, "reveal_words")
+                                      ? FindBinding(cfg, "reveal_words")->key : "<unset>")
+                  << ") to hover subtitle words -- a dictionary card pops up\n"
+                  << "    - Buttons: [Pause Game] sends your mapped pause key, [Pause Subs] freezes cadence\n"
+                  << "    - [-] / [+] control subtitle speed (0.25x - 2.00x)\n"
+                  << "    - Every hotkey is remappable in the Control Panel (Hotkeys & Style)\n";
 
         MSG msg;
         while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
@@ -667,6 +1009,7 @@ public:
             DispatchMessageW(&msg);
         }
         CleanupLargeFonts();
+        DictSvc::Stop();          // join worker before leaving the message loop
         return 0;
     }
 };
