@@ -22,6 +22,7 @@
 
 #include "DualTitleEngine.hpp"
 #include "DualTitleConfig.hpp"
+#include "DualTitleDictService.hpp"
 #include "DualTitleTheme.hpp"
 #include "DualTitleOverlay.hpp"
 #include <cassert>
@@ -1156,9 +1157,44 @@ static int RunCppSelfTests() {
     }
     std::cout << "             PASS: config.json roundtrip + remap defaults verified.\n";
 
+    // Test 7: Background dictionary service (worker thread, stale result drop)
+    std::cout << "  [Test 7/7] Testing background dictionary service...\n";
+    {
+        DualTitle::DictSvc::Start();
+        // Known word with builtin synonyms
+        int req_known = DualTitle::DictSvc::BeginRequest();
+        DualTitle::DictSvc::Query("bats", req_known);
+        DualTitle::DictSvc::DictResult r;
+        bool got_known = false;
+        for (int i = 0; i < 200 && !got_known; ++i) {         // <= 2 s
+            got_known = DualTitle::DictSvc::Pump(r);
+            if (got_known) break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        assert(got_known);
+        assert(r.req == req_known);
+        assert(r.found);
+        assert(r.word == "bats");
+        bool has_syn = false;
+        for (const auto& s : r.entry.synonyms) if (s == "clubs") has_syn = true;
+        assert(has_syn);
+        // Unknown word -> honest not-found
+        int req_unknown = DualTitle::DictSvc::BeginRequest();
+        DualTitle::DictSvc::Query("zzqxkj", req_unknown);
+        bool got_unknown = false;
+        for (int i = 0; i < 200 && !got_unknown; ++i) {
+            got_unknown = DualTitle::DictSvc::Pump(r);
+            if (got_unknown) break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        assert(got_unknown && r.req == req_unknown && !r.found);
+        DualTitle::DictSvc::Stop();
+    }
+    std::cout << "             PASS: async lookup with synonyms verified (worker thread UIS).\n";
+
     fs::remove_all(tmp, ec);
     std::cout << "========================================================================\n"
-              << "  ALL 6 C++17 CORE VERIFICATION SUITES PASSED SUCCESSFULLY!\n"
+              << "  ALL 7 C++17 CORE VERIFICATION SUITES PASSED SUCCESSFULLY!\n"
               << "========================================================================\n";
     return 0;
 }
