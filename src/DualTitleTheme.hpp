@@ -1,16 +1,16 @@
 #pragma once
 /**
- * DualTitleTheme.hpp — "Aurora" Modern-Minimal Design System (C++17 / Win32)
+ * DualTitleTheme.hpp -- "Aurora" Modern-Minimal Design System (C++17 / Win32)
  *
  * A small, dependency-free design language shared by the DualTitle Control Panel
  * and the In-Game Overlay HUD:
  *
- *   • Dark charcoal palette with sky-blue (#38BDF8) + gold (#FFD700) accents
- *   • Segoe UI Variable typography (auto-fallback to Segoe UI), DPI-scaled fonts
- *   • Anti-aliased rounded cards / buttons / pills rendered with GDI+
- *   • Flat owner-drawn buttons with hover + pressed states (no child controls)
+ *   * Dark charcoal palette with sky-blue (#38BDF8) + gold (#FFD700) accents
+ *   * Segoe UI Variable typography (auto-fallback to Segoe UI), DPI-scaled fonts
+ *   * Anti-aliased rounded cards / buttons / pills rendered with GDI+
+ *   * Flat owner-drawn buttons with hover + pressed states (no child controls)
  *
- * 100% cosmetic layer — never touches game processes (anti-cheat safe by design).
+ * 100% cosmetic layer -- never touches game processes (anti-cheat safe by design).
  */
 
 #include "DualTitleEngine.hpp"
@@ -66,7 +66,7 @@ inline namespace Palette {
 }
 
 // ============================================================================
-// 2. DPI Scaling & Font Factory (Segoe UI Variable → Segoe UI fallback)
+// 2. DPI Scaling & Font Factory (Segoe UI Variable -> Segoe UI fallback)
 // ============================================================================
 
 /** Best UI font face available on this Windows version (probed once). */
@@ -97,7 +97,7 @@ inline const wchar_t* UiFace() {
     return face;
 }
 
-/** Logical (96-dpi) pixels → physical pixels for a DPI value. */
+/** Logical (96-dpi) pixels -> physical pixels for a DPI value. */
 inline int S(int logical, int dpi) {
     return MulDiv(logical, dpi, 96);
 }
@@ -200,7 +200,7 @@ inline void FillCircle(HDC hdc, int cx, int cy, int radius, COLORREF color, int 
     g.FillEllipse(&brush, cx - radius, cy - radius, radius * 2, radius * 2);
 }
 
-/** Linear color blend (t=0 → a, t=1 → b). */
+/** Linear color blend (t=0 -> a, t=1 -> b). */
 inline COLORREF Blend(COLORREF a, COLORREF b, double t) {
     t = std::max(0.0, std::min(1.0, t));
     int r = static_cast<int>(GetRValue(a) + (GetRValue(b) - GetRValue(a)) * t);

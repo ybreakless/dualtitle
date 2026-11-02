@@ -1,12 +1,12 @@
 /**
- * DualTitle.cpp — Main C++17 Native Application for DualTitle ("Aurora" v5)
+ * DualTitle.cpp -- Main C++17 Native Application for DualTitle ("Aurora" v5)
  * (Universal Anti-Cheat-Safe Dual-Subtitles, Audio Controller, Save Manager & Live Overlay)
  *
  * Features:
  *   1. [NATIVE WIN32 "AURORA" DARK GUI (`--gui` or default on Windows)]:
  *      Modern minimal DPI-aware control panel (src/DualTitleTheme.hpp design system):
  *      rounded cards, flat owner-drawn buttons with hover states, dark-styled combos,
- *      auto game library scan on a background thread (C:–Z:), 1-Click "Launch Game +
+ *      auto game library scan on a background thread (C:-Z:), 1-Click "Launch Game +
  *      Overlay HUD", and 1-Click "Restore Save".
  *   2. [100% ANTI-CHEAT SAFE / ZERO INJECTION]:
  *      Never injects DLLs or opens foreign process handles. Cleans any legacy `.utoc`/`.ucas`/
@@ -35,6 +35,7 @@ using namespace DualTitle;
 struct DetectedGame {
     std::string title;
     fs::path path;
+    std::string source; // "steam", "ea", "scan", etc.
 };
 
 static bool IsSuiteDirectory(const fs::path& p) {
@@ -67,16 +68,75 @@ static std::vector<DetectedGame> ScanInstalledGames() {
     std::set<std::string> seen;
     std::error_code ec;
 
-    auto add_if_valid = [&](const fs::path& p) {
+    auto add_if_valid = [&](const fs::path& p, const std::string& source = "scan") {
         if (!LooksLikeApplicationDir(p)) return;
         std::string abs_str = fs::weakly_canonical(p, ec).string();
         if (seen.insert(abs_str).second) {
             std::string title = p.filename().string();
             if (title.empty()) title = abs_str;
-            found.push_back({title, p});
+            found.push_back({title, p, source});
         }
     };
 
+    // --- Steam libraryfolders.vdf parser ---
+    auto scanSteamLibrary = [&](const fs::path& steam_root) {
+        fs::path vdf_path = steam_root / "steamapps" / "libraryfolders.vdf";
+        if (!fs::exists(vdf_path, ec)) return;
+        std::string vdf = ReadTextFile(vdf_path);
+        // Very simple VDF parser for "libraryfolders" { "0" { "path" "C:\\Games" } ... }
+        std::regex path_regex("\"path\"\\s+\"([^\"]+)\"");
+        std::smatch match;
+        std::string::const_iterator search_start(vdf.cbegin());
+        while (std::regex_search(search_start, vdf.cend(), match, path_regex)) {
+            fs::path lib_path(match[1].str());
+            fs::path common = lib_path / "steamapps" / "common";
+            if (fs::is_directory(common, ec)) {
+                for (const auto& item : fs::directory_iterator(common, ec)) {
+                    if (item.is_directory(ec)) add_if_valid(item.path(), "steam");
+                }
+            }
+            // Also read appmanifest_*.acf for game names
+            for (const auto& acf : fs::directory_iterator(lib_path / "steamapps", ec)) {
+                if (!acf.is_regular_file(ec)) continue;
+                std::string fn = acf.path().filename().string();
+                if (fn.rfind("appmanifest_", 0) == 0 && fn.size() > 12 && fn.substr(fn.size() - 4) == ".acf") {
+                    std::string acf_text = ReadTextFile(acf.path());
+                    std::regex name_regex("\"name\"\\s+\"([^\"]+)\"");
+                    std::regex install_regex("\"installdir\"\\s+\"([^\"]+)\"");
+                    std::smatch nm, im;
+                    if (std::regex_search(acf_text, nm, name_regex) && std::regex_search(acf_text, im, install_regex)) {
+                        fs::path game_path = common / im[1].str();
+                        if (fs::is_directory(game_path, ec)) add_if_valid(game_path, "steam:" + nm[1].str());
+                    }
+                }
+            }
+            search_start = match.suffix().first;
+        }
+    };
+
+    // --- EA App / Origin manifest parser ---
+    auto scanEALibrary = [&](const fs::path& ea_root) {
+        // EA App stores manifests in EAAppData/Local/EA/EA Desktop/Installed
+        // Origin stores in Origin Games or Program Files/Origin Games
+        std::vector<fs::path> ea_roots = {
+            ea_root / "EA Games",
+            ea_root / "Origin Games",
+            ea_root / "Electronic Arts" / "EA Games",
+            ea_root / "Electronic Arts" / "Origin Games"
+        };
+        if (const char* la = std::getenv("LOCALAPPDATA")) {
+            ea_roots.push_back(fs::path(la) / "EA" / "EA Desktop" / "Installed");
+            ea_roots.push_back(fs::path(la) / "Origin" / "Installed");
+        }
+        for (const auto& eroot : ea_roots) {
+            if (!fs::is_directory(eroot, ec)) continue;
+            for (const auto& item : fs::directory_iterator(eroot, ec)) {
+                if (item.is_directory(ec)) add_if_valid(item.path(), "ea");
+            }
+        }
+    };
+
+    // --- Drive enumeration ---
     std::vector<std::string> drives;
 #ifdef _WIN32
     for (char d : std::string("CDEFGHIJKLMNOPQRSTUVWXYZ")) {
@@ -87,28 +147,35 @@ static std::vector<DetectedGame> ScanInstalledGames() {
     drives.push_back("/");
 #endif
 
-    const std::vector<fs::path> library_rel_paths = {
-        "Games",
-        "Origin Games",
-        "EA Games",
-        "GOG Games",
-        "Epic Games",
-        fs::path("SteamLibrary") / "steamapps" / "common",
-        fs::path("Program Files (x86)") / "Steam" / "steamapps" / "common",
-        fs::path("Program Files") / "Steam" / "steamapps" / "common",
-        fs::path("Program Files (x86)") / "Origin Games",
-        fs::path("Program Files") / "EA Games",
-        fs::path("Program Files (x86)") / "Ubisoft" / "Ubisoft Game Launcher" / "games",
-        fs::path("Ubisoft Game Launcher") / "games"
-    };
-
+    // --- Known library paths per drive ---
     for (const auto& drv : drives) {
         fs::path dpath(drv);
-        for (const auto& rel : library_rel_paths) {
-            fs::path lib_dir = dpath / rel;
-            if (!fs::is_directory(lib_dir, ec)) continue;
-            for (const auto& item : fs::directory_iterator(lib_dir, ec)) {
-                if (item.is_directory(ec)) add_if_valid(item.path());
+        // Steam default locations
+        scanSteamLibrary(dpath / "Program Files (x86)" / "Steam");
+        scanSteamLibrary(dpath / "Program Files" / "Steam");
+        scanSteamLibrary(dpath / "SteamLibrary");
+        // EA/Origin
+        scanEALibrary(dpath / "Program Files (x86)" / "Origin Games");
+        scanEALibrary(dpath / "Program Files" / "EA Games");
+        scanEALibrary(dpath / "Origin Games");
+        scanEALibrary(dpath / "EA Games");
+        // Other known launchers
+        std::vector<fs::path> other_roots = {
+            dpath / "Games",
+            dpath / "GOG Games",
+            dpath / "Epic Games",
+            dpath / "Program Files (x86)" / "Ubisoft" / "Ubisoft Game Launcher" / "games",
+            dpath / "Ubisoft Game Launcher" / "games",
+            dpath / "Program Files (x86)" / "GOG Galaxy" / "Games",
+            dpath / "Program Files" / "GOG Galaxy" / "Games",
+            dpath / "Program Files (x86)" / "Epic Games",
+            dpath / "Program Files" / "Epic Games"
+        };
+        for (const auto& oroot : other_roots) {
+            if (fs::is_directory(oroot, ec)) {
+                for (const auto& item : fs::directory_iterator(oroot, ec)) {
+                    if (item.is_directory(ec)) add_if_valid(item.path(), "scan");
+                }
             }
         }
         // Also scan top-level folders on drives D:..Z:
@@ -119,7 +186,7 @@ static std::vector<DetectedGame> ScanInstalledGames() {
                 if (!fn.empty() && fn[0] != '$' && fn[0] != '.' &&
                     fn != "Windows" && fn != "Program Files" && fn != "Program Files (x86)" &&
                     fn != "Users" && fn != "System Volume Information") {
-                    add_if_valid(item.path());
+                    add_if_valid(item.path(), "scan");
                 }
             }
         }
@@ -207,7 +274,7 @@ public:
     static inline std::vector<Theme::FlatBtn> buttons;
     static inline std::map<int, Theme::BtnState> btn_state;
     static inline std::wstring status_text =
-        L"Ready — 100% zero-injection anti-cheat-safe mode. Saves are backed up before every launch.";
+        L"Ready -- 100% zero-injection anti-cheat-safe mode. Saves are backed up before every launch.";
     static inline Tone status_tone = ToneInfo;
     static inline bool mouse_tracking = false;
     static inline HBRUSH bEditBg = nullptr;
@@ -233,12 +300,12 @@ public:
         L.card2 = R(s(20), L.card1.bottom + s(14), s(640), s(138));
         L.card3 = R(s(20), L.card2.bottom + s(14), s(640), s(118));
 
-        // Card 1 — game library
+        // Card 1 -- game library
         L.rComboGame = R(L.card1.left + s(16), L.card1.top + s(36), s(608), s(26));
         L.rEdit = R(L.card1.left + s(16), L.rComboGame.bottom + s(12), s(496), s(26));
         L.rBrowse = R(L.rEdit.right + s(8), L.rEdit.top, s(102), s(26));
 
-        // Card 2 — languages & playback (two columns, caption above each field)
+        // Card 2 -- languages & playback (two columns, caption above each field)
         int colB = L.card2.left + s(320);
         L.rComboAudio = R(L.card2.left + s(16), L.card2.top + s(42), s(288), s(26));
         L.rComboSpeed = R(colB, L.card2.top + s(42), s(288), s(26));
@@ -249,7 +316,7 @@ public:
         L.micro3 = R(L.rComboPrim.left, L.rComboPrim.top - s(18), s(220), s(14));
         L.micro4 = R(L.rComboSec.left, L.micro3.top, s(220), s(14));
 
-        // Card 3 — actions
+        // Card 3 -- actions
         L.rLaunch = R(L.card3.left + s(16), L.card3.top + s(16), s(608), s(46));
         int row_w = s(608);
         int gap = s(8);
@@ -279,7 +346,7 @@ public:
     static void BuildButtons() {
         Layout L = GetLayout();
         buttons.clear();
-        buttons.push_back({ID_BTN_BROWSE, L.rBrowse, L"Browse…", Theme::BtnGhost});
+        buttons.push_back({ID_BTN_BROWSE, L.rBrowse, L"Browse...", Theme::BtnGhost});
         buttons.push_back({ID_BTN_LAUNCH_ALL, L.rLaunch, L"Launch Game + Overlay HUD", Theme::BtnPrimary});
         const wchar_t* labels[5] = {
             L"Overlay Only", L"Apply Config", L"Backup Save", L"Restore Save", L"Repair & Clean"
@@ -361,7 +428,7 @@ public:
         }
 
         if (edit_area) {
-            // Full dark fill (square) — the parent draws the rounded ring around the field
+            // Full dark fill (square) -- the parent draws the rounded ring around the field
             HBRUSH fill = CreateSolidBrush(Theme::Inner);
             FillRect(hdc, &rc, fill);
             DeleteObject(fill);
@@ -388,7 +455,7 @@ public:
         // (The chevron lives on the cover static that sits over the combo's native button)
     }
 
-    // ---- Actions (same engine calls as v4 — zero behavior change) ------------
+    // ---- Actions (same engine calls as v4 -- zero behavior change) ------------
     static void RunButton(HWND hwnd, int id) {
         BuildButtons();
 
@@ -420,29 +487,32 @@ public:
         } else if (id == ID_BTN_RESTORE_SAVE) {
             std::ostringstream log_ss;
             int cnt = SaveBackupManager::RestoreSaves(gdir, log_ss);
-            SetStatus(hwnd, L"Restore complete — " + std::to_wstring(cnt) +
+            SetStatus(hwnd, L"Restore complete -- " + std::to_wstring(cnt) +
                       L" save/profile file(s) restored & verified.", cnt > 0 ? ToneOk : ToneInfo);
             MessageBoxW(hwnd, L"Restore Save complete.", L"DualTitle", MB_OK | MB_ICONINFORMATION);
         } else if (id == ID_BTN_BACKUP_SAVE) {
             std::ostringstream log_ss;
             int cnt = SaveBackupManager::BackupSaves(gdir, log_ss);
-            SetStatus(hwnd, L"Backup complete — " + std::to_wstring(cnt) +
+            SetStatus(hwnd, L"Backup complete -- " + std::to_wstring(cnt) +
                       L" save/profile file(s) secured to .dualtitle_save_backup.", ToneOk);
             MessageBoxW(hwnd, L"Backup Save complete.", L"DualTitle", MB_OK | MB_ICONINFORMATION);
         } else if (id == ID_BTN_REPAIR) {
             std::ostringstream log_ss;
             int fixed_n = EmergencyGameRepair::RepairGameDirectory(gdir, log_ss);
             SaveBackupManager::RestoreSaves(gdir, log_ss);
-            SetStatus(hwnd, L"Repair complete — " + std::to_wstring(fixed_n) +
+            SetStatus(hwnd, L"Repair complete -- " + std::to_wstring(fixed_n) +
                       L" file(s) cleaned & original saves verified.", ToneOk);
             MessageBoxW(hwnd, L"Repair & Clean complete.", L"DualTitle", MB_OK | MB_ICONINFORMATION);
         } else if (id == ID_BTN_APPLY_ONLY) {
             std::ostringstream log_ss;
             EmergencyGameRepair::RepairGameDirectory(gdir, log_ss);
-            ConfigPatcher::ApplyGameConfig(gdir, a_lang, p_lang, log_ss);
+            int idx = static_cast<int>(SendMessageW(hComboGame, CB_GETCURSEL, 0, 0));
+            const GameProfile* profile = (idx >= 0 && static_cast<size_t>(idx) < games_list.size())
+                ? MatchGameProfile(games_list[static_cast<size_t>(idx)].title) : nullptr;
+            ConfigPatcher::ApplyGameConfig(gdir, a_lang, p_lang, profile, log_ss);
             SetStatus(hwnd, L"Safe pre-game audio/subtitle config applied (saves backed up automatically).", ToneOk);
         } else if (id == ID_BTN_OVERLAY_ONLY) {
-            SetStatus(hwnd, L"Overlay HUD running — return to your game and press ALT+F8 to hide/show.", ToneInfo);
+            SetStatus(hwnd, L"Overlay HUD running -- return to your game and press ALT+F8 to hide/show.", ToneInfo);
             ShowWindow(hwnd, SW_MINIMIZE);
             Win32UniversalOverlay::RunOverlayLoop(gdir, p_lang, s_lang, spd);
             SetStatus(hwnd, L"Overlay session ended.", ToneInfo);
@@ -450,16 +520,35 @@ public:
             std::ostringstream log_ss;
             // 1. Back up saves and clean any foreign files so anti-cheat is 100% happy
             SaveBackupManager::BackupSaves(gdir, log_ss);
-            EmergencyGameRepair::RepairGameDirectory(gdir, log_ss);
-            ConfigPatcher::ApplyGameConfig(gdir, a_lang, p_lang, log_ss);
+            EmergencyGameRepair::RepairGameDirectory(gdir, log_ss, false); // dry_run=false for actual launch
+            ConfigPatcher::ApplyGameConfig(gdir, a_lang, p_lang, nullptr, log_ss);
 
-            // 2. Launch the game executable cleanly via ShellExecuteW
-            fs::path exe_path = FindMainGameExecutable(gdir);
-            if (!exe_path.empty()) {
-                ShellExecuteW(nullptr, L"open", exe_path.wstring().c_str(), nullptr, gdir.wstring().c_str(), SW_SHOWNORMAL);
-            } else {
-                SetStatus(hwnd, L"No game executable found in that folder — check the path or Browse again.", ToneWarn);
+            // 2. Launch the game -- prefer Steam/EA deep link if profile has one
+            int idx = static_cast<int>(SendMessageW(hComboGame, CB_GETCURSEL, 0, 0));
+            const GameProfile* profile = (idx >= 0 && static_cast<size_t>(idx) < games_list.size())
+                ? MatchGameProfile(games_list[static_cast<size_t>(idx)].title) : nullptr;
+
+            bool launched = false;
+            if (profile && !profile->steam_appid.empty()) {
+                std::wstring steam_url = L"steam://rungameid/" + Win32UniversalOverlay::Utf8ToWide(profile->steam_appid);
+                launched = (ShellExecuteW(nullptr, L"open", steam_url.c_str(), nullptr, nullptr, SW_SHOWNORMAL) > (HINSTANCE)32);
+                if (launched) log_ss << "    [Launcher] Launched via Steam: " << profile->steam_appid << "\n";
             }
+            if (!launched && profile && profile->launcher_hint == "ea") {
+                // EA App deep link: link2ea://launchgame?productId=<id> (requires product ID)
+                // Fallback: try to find ea_emu.ini or use direct exe
+            }
+            if (!launched) {
+                fs::path exe_path = FindMainGameExecutable(gdir);
+                if (!exe_path.empty()) {
+                    ShellExecuteW(nullptr, L"open", exe_path.wstring().c_str(), nullptr, gdir.wstring().c_str(), SW_SHOWNORMAL);
+                    launched = true;
+                    log_ss << "    [Launcher] Launched direct: " << exe_path.string() << "\n";
+                } else {
+                    SetStatus(hwnd, L"No game executable found in that folder -- check the path or Browse again.", ToneWarn);
+                }
+            }
+
             // 3. Minimize control panel and start the Anti-Cheat-Safe In-Game Overlay HUD
             ShowWindow(hwnd, SW_MINIMIZE);
             Win32UniversalOverlay::RunOverlayLoop(gdir, p_lang, s_lang, spd);
@@ -487,7 +576,7 @@ public:
                     SendMessageW(h, CB_SETITEMHEIGHT, 0, static_cast<LPARAM>(
                         static_cast<DWORD>(rc.bottom - rc.top)));
                     SetWindowTheme(h, L"DarkMode_Explorer", nullptr);
-                    // Clip 1px inset — hides the combo's classic light frame lines
+                    // Clip 1px inset -- hides the combo's classic light frame lines
                     HRGN inset = CreateRectRgn(1, 1, rc.right - rc.left - 1, rc.bottom - rc.top - 1);
                     if (inset) SetWindowRgn(h, inset, TRUE);
                     return h;
@@ -544,7 +633,7 @@ public:
                     int sel = 0;
                     for (size_t i = 0; i < langs.size(); ++i) {
                         std::wstring lbl = Win32UniversalOverlay::Utf8ToWide(
-                            langs[i].display_name + "  ·  " + langs[i].code);
+                            langs[i].display_name + "  *  " + langs[i].code);
                         SendMessageW(hc, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(lbl.c_str()));
                         if (langs[i].code == def) sel = static_cast<int>(i);
                     }
@@ -555,12 +644,12 @@ public:
                 fill_lang(hComboSec, "de");
 
                 const wchar_t* speed_labels[] = {
-                    L"0.50×  ·  Slow Study",
-                    L"0.75×  ·  Relaxed",
-                    L"1.00×  ·  Real-Time",
-                    L"1.25×  ·  Fast",
-                    L"1.50×  ·  Rapid",
-                    L"2.00×  ·  Double"
+                    L"0.50x  *  Slow Study",
+                    L"0.75x  *  Relaxed",
+                    L"1.00x  *  Real-Time",
+                    L"1.25x  *  Fast",
+                    L"1.50x  *  Rapid",
+                    L"2.00x  *  Double"
                 };
                 for (int i = 0; i < 6; ++i) {
                     SendMessageW(hComboSpeed, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(speed_labels[i]));
@@ -569,10 +658,10 @@ public:
 
                 // Game combo placeholder until the background scan returns
                 SendMessageW(hComboGame, CB_ADDSTRING, 0,
-                    reinterpret_cast<LPARAM>(L"Scanning installed games (C: – Z:)…"));
+                    reinterpret_cast<LPARAM>(L"Scanning installed games (C: - Z:)..."));
                 SendMessageW(hComboGame, CB_SETCURSEL, 0, 0);
 
-                // Background game library scan — UI never freezes
+                // Background game library scan -- UI never freezes
                 std::thread([hwnd]() {
                     auto games = ScanInstalledGames();
                     auto* payload = new std::vector<DetectedGame>(std::move(games));
@@ -602,10 +691,10 @@ public:
                     SetStatus(hwnd, L"Found " + std::to_wstring(games_list.size()) +
                         L" installed game(s). Pick one, choose your languages, then launch.", ToneOk);
                 } else {
-                    std::wstring ph = L"No games auto-detected — paste a folder above or Browse…";
+                    std::wstring ph = L"No games auto-detected -- paste a folder above or Browse...";
                     SendMessageW(hComboGame, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(ph.c_str()));
                     SendMessageW(hComboGame, CB_SETCURSEL, 0, 0);
-                    SetStatus(hwnd, L"No games found automatically — paste any game folder path or use Browse…", ToneWarn);
+                    SetStatus(hwnd, L"No games found automatically -- paste any game folder path or use Browse...", ToneWarn);
                 }
                 InvalidateRect(hwnd, nullptr, TRUE);
                 return 0;
@@ -770,7 +859,7 @@ public:
                 // --- Header
                 Win32UniversalOverlay::DrawDualTitleMiniLogo(hdc, s(24), s(24), s(44));
                 Theme::DrawLabel(hdc, L"DualTitle", RECT{s(84), s(18), s(320), s(48)}, fonts.title, Theme::TextTitle);
-                Theme::DrawLabel(hdc, L"Universal Dual Subtitles · Anti-Cheat-Safe Overlay · Dictionary · Save Guard",
+                Theme::DrawLabel(hdc, L"Universal Dual Subtitles * Anti-Cheat-Safe Overlay * Dictionary * Save Guard",
                     RECT{s(84), s(48), s(520), s(68)}, fonts.sub, Theme::TextMuted);
                 Theme::RoundRectFill(hdc, L.rVersion, s(10), Theme::GhostFill, 255, Theme::GhostBorder, 220);
                 Theme::DrawLabel(hdc, L"v5.0", L.rVersion, fonts.section, Theme::Accent, 1,
@@ -798,8 +887,8 @@ public:
                 Theme::DrawLabel(hdc, L"LANGUAGES & PLAYBACK", L.section2, fonts.section, Theme::TextFaint, 2);
                 Theme::DrawLabel(hdc, L"SPOKEN AUDIO", L.micro1, fonts.section, Theme::TextFaint, 1);
                 Theme::DrawLabel(hdc, L"PLAYBACK SPEED", L.micro2, fonts.section, Theme::TextFaint, 1);
-                Theme::DrawLabel(hdc, L"PRIMARY · TOP LINE", L.micro3, fonts.section, Theme::Gold, 1);
-                Theme::DrawLabel(hdc, L"SECONDARY · BOTTOM LINE", L.micro4, fonts.section, Theme::IceWhite, 1);
+                Theme::DrawLabel(hdc, L"PRIMARY * TOP LINE", L.micro3, fonts.section, Theme::Gold, 1);
+                Theme::DrawLabel(hdc, L"SECONDARY * BOTTOM LINE", L.micro4, fonts.section, Theme::IceWhite, 1);
 
                 // --- Card 3: ACTIONS
                 Theme::RoundRectFill(hdc, L.card3, s(10), Theme::Card, 255, Theme::CardBorder, 230);
@@ -825,7 +914,7 @@ public:
                 SelectObject(hdc, fnt_old);
 
                 // --- Footer
-                Theme::DrawLabel(hdc, L"100% Anti-Cheat Safe · Zero Injection · Zero DLLs · Zero Hooks",
+                Theme::DrawLabel(hdc, L"100% Anti-Cheat Safe * Zero Injection * Zero DLLs * Zero Hooks",
                     L.footer, fonts.section, Theme::TextFaint, 1, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
 
                 EndPaint(hwnd, &ps);
@@ -877,7 +966,7 @@ public:
 
         HWND hwnd = CreateWindowExW(
             WS_EX_APPWINDOW, clsName,
-            L"DualTitle — Universal Dual Subtitles",
+            L"DualTitle -- Universal Dual Subtitles",
             style | WS_VISIBLE,
             (sw - w) / 2, (sh - h) / 2, w, h,
             nullptr, nullptr, hInst, nullptr
@@ -937,7 +1026,7 @@ static int RunCppSelfTests() {
     WriteTextFile(loc_en / "Game.locres", "DLG_01 synthetic");
 
     std::ostringstream null_log;
-    int fixed = EmergencyGameRepair::RepairGameDirectory(ue_dir, null_log);
+    int fixed = EmergencyGameRepair::RepairGameDirectory(ue_dir, null_log, false);
     assert(fixed >= 4);
     assert(!fs::exists(paks_mods / "pakchunk99-DualSub_en_de_P.utoc"));
     assert(!fs::exists(paks_mods / "pakchunk99-DualSub_en_de_P.ucas"));
@@ -955,7 +1044,7 @@ static int RunCppSelfTests() {
     WriteTextFile(app_dir / "settings" / "PROF_SAVE_profile", "GstAudio.Subtitles 0\nGstAudio.AudioLanguage 0\n");
     WriteTextFile(app_dir / "Saved" / "SaveGames" / "Slot1.sav", "ORIGINAL_USER_SAVE_PROGRESS_100%");
 
-    ConfigPatcher::ApplyGameConfig(app_dir, "ja", "de", null_log);
+    ConfigPatcher::ApplyGameConfig(app_dir, "ja", "de", nullptr, null_log);
     std::string patched_ini = ReadTextFile(app_dir / "steam_api.ini");
     assert(patched_ini.find("Language=german") != std::string::npos);
     assert(patched_ini.find("AudioLanguage=japanese") != std::string::npos);
@@ -1008,14 +1097,14 @@ static int RunCppSelfTests() {
     bool forge_ok = ForgePatcher::PatchForgeArchive(forge_file, "en", "de", null_log);
     assert(forge_ok);
     assert(fs::file_size(forge_file) > orig_size);
-    EmergencyGameRepair::RepairGameDirectory(app_dir, null_log);
+    EmergencyGameRepair::RepairGameDirectory(app_dir, null_log, false);
     assert(fs::file_size(forge_file) == orig_size);
     std::cout << "             PASS: FORGE v27 append-only patch and restore verified.\n";
 
     // Test 4: Read-Only Anti-Cheat-Safe Frostbite & SRT Subtitle Indexing
     std::cout << "  [Test 4/5] Testing Read-Only Anti-Cheat-Safe Subtitle Indexer...\n";
     WriteTextFile(app_dir / "Data" / "Win32" / "Loc" / "en.sb", "LANG:en:Hold the line and stay together!\nMove to the objective!");
-    WriteTextFile(app_dir / "Data" / "Win32" / "Loc" / "de.sb", "LANG:de:Haltet die Stellung und bleibt zusammen!\nRückt zum Ziel vor!");
+    WriteTextFile(app_dir / "Data" / "Win32" / "Loc" / "de.sb", "LANG:de:Haltet die Stellung und bleibt zusammen!\nRueckt zum Ziel vor!");
     auto indexed = SubtitleMerger::IndexGameSubtitlesReadOnly(app_dir, "en", "de");
     assert(indexed.size() >= 2);
     assert(indexed[0].primary == "Hold the line and stay together!");
@@ -1028,13 +1117,13 @@ static int RunCppSelfTests() {
     fs::path srt_de = tmp / "sub_de.srt";
     fs::path srt_out = tmp / "sub_dual.srt";
     WriteTextFile(srt_en, "1\n00:00:01,000 --> 00:00:03,000\nLook over there! It's a bat!\n");
-    WriteTextFile(srt_de, "1\n00:00:01,000 --> 00:00:03,000\nSieh mal da drüben! Eine Fledermaus!\n");
+    WriteTextFile(srt_de, "1\n00:00:01,000 --> 00:00:03,000\nSieh mal da drueben! Eine Fledermaus!\n");
     assert(SubtitleMerger::MergeSrtFiles(srt_en, srt_de, srt_out));
     std::string dual_srt = ReadTextFile(srt_out);
-    assert(dual_srt.find("Look over there! It's a bat!\nSieh mal da drüben! Eine Fledermaus!") != std::string::npos);
+    assert(dual_srt.find("Look over there! It's a bat!\nSieh mal da drueben! Eine Fledermaus!") != std::string::npos);
 
     auto d_entry = FamousDictionary::Lookup("bats");
-    assert(d_entry.translation.find("Fledermäuse") != std::string::npos);
+    assert(d_entry.translation.find("Fledermaeuse") != std::string::npos);
     std::cout << "             PASS: SRT dual-subtitle merger and Famous Dictionary verified.\n";
 
     fs::remove_all(tmp, ec);
@@ -1060,8 +1149,8 @@ static int InteractiveMenu() {
 
     while (true) {
         std::cout << "\n==============================================================================\n"
-                  << "        DUALTITLE (C++17 EDITION) — ANTI-CHEAT-SAFE DUAL SUBTITLES\n"
-                  << "   Game Library Picker • Save Backup & Restore • Clickable-Word & Speed HUD\n"
+                  << "        DUALTITLE (C++17 EDITION) -- ANTI-CHEAT-SAFE DUAL SUBTITLES\n"
+                  << "   Game Library Picker * Save Backup & Restore * Clickable-Word & Speed HUD\n"
                   << "==============================================================================\n"
                   << "  Active Application   : " << active_game.string() << "\n"
                   << "  [Audio Language]     : " << GetLanguageDisplayName(audio_lang) << "\n"
@@ -1152,7 +1241,7 @@ static int InteractiveMenu() {
             std::cout << "\n  Applying Safe Pre-Launch Config & Subtitle Patch to: " << active_game.string() << "\n";
             SaveBackupManager::BackupSaves(active_game, std::cout);
             EmergencyGameRepair::RepairGameDirectory(active_game, std::cout);
-            ConfigPatcher::ApplyGameConfig(active_game, audio_lang, primary_lang, std::cout);
+            ConfigPatcher::ApplyGameConfig(active_game, audio_lang, primary_lang, nullptr, std::cout);
             ForgePatcher::PatchForgeArchive(active_game / "DataPC.forge", primary_lang, secondary_lang, std::cout);
             ForgePatcher::PatchForgeArchive(active_game / "DataPC_boot.forge", primary_lang, secondary_lang, std::cout);
             std::cout << "  [SUCCESS] Safe patch complete! Press Enter to continue...";
@@ -1162,7 +1251,7 @@ static int InteractiveMenu() {
             if (c == 'l') {
                 SaveBackupManager::BackupSaves(active_game, std::cout);
                 EmergencyGameRepair::RepairGameDirectory(active_game, std::cout);
-                ConfigPatcher::ApplyGameConfig(active_game, audio_lang, primary_lang, std::cout);
+                ConfigPatcher::ApplyGameConfig(active_game, audio_lang, primary_lang, nullptr, std::cout);
                 fs::path exe_p = FindMainGameExecutable(active_game);
                 if (!exe_p.empty()) {
                     ShellExecuteW(nullptr, L"open", exe_p.wstring().c_str(), nullptr, active_game.wstring().c_str(), SW_SHOWNORMAL);
