@@ -26,6 +26,7 @@
 #include "DualTitleTheme.hpp"
 #include "DualTitleOverlay.hpp"
 #include <cassert>
+#include <cstdio>
 #include <thread>
 
 using namespace DualTitle;
@@ -251,13 +252,18 @@ public:
         ID_COMBO_PRIM = 1005,
         ID_COMBO_SEC = 1006,
         ID_COMBO_SPEED = 1007,
+        ID_COMBO_STYLE = 1008,
         ID_BTN_LAUNCH_ALL = 1101,
         ID_BTN_OVERLAY_ONLY = 1102,
         ID_BTN_APPLY_ONLY = 1103,
         ID_BTN_RESTORE_SAVE = 1104,
         ID_BTN_BACKUP_SAVE = 1105,
         ID_BTN_REPAIR = 1106,
-        ID_BTN_BROWSE = 1107
+        ID_BTN_BROWSE = 1107,
+        ID_BTN_SAVE_CFG = 1108,
+        ID_BTN_RESET_CFG = 1109,
+        ID_KEY_CHIP0 = 1500,     // + index: hotkey capture chips
+        ID_CHIP_CARD0 = 1520     // + index: dict-card toggle chips
     };
 
     enum Tone { ToneInfo, ToneOk, ToneWarn };
@@ -271,6 +277,7 @@ public:
     static inline HWND hComboPrim = nullptr;
     static inline HWND hComboSec = nullptr;
     static inline HWND hComboSpeed = nullptr;
+    static inline HWND hComboStyle = nullptr;
     static inline Theme::FontSet fonts;
     static inline int dpi = 96;
     static inline std::vector<Theme::FlatBtn> buttons;
@@ -282,15 +289,28 @@ public:
     static inline HBRUSH bEditBg = nullptr;
     static inline HBRUSH bListBg = nullptr;
     static inline const UINT WM_APP_SCANDONE = WM_APP + 1;
+    // Remap + style settings (persisted through DualTitleConfig)
+    static inline DualTitle::DualTitleConfig::AppConfig cfg;
+    static inline fs::path cfg_path;
+    static inline int capture_action_idx = -1;   // -1 = not capturing, else index into kKnownActions
+    static inline std::wstring style_names[3] = {
+        L"Aurora (DualTitle default)", L"Mimic Frostbite (white game subs)",
+        L"Classic Console (blocky)" };
+    static inline const char* style_ids[3] = {
+        "aurora", "mimic_frostbite", "classic_console" };
 
     // ---- Layout (logical 96-dpi design grid, scaled on demand) ---------------
     struct Layout {
-        RECT card1{}, card2{}, card3{};
+        RECT card1{}, card2{}, card3{}, card4{}, card5{};
         RECT rComboGame{}, rEdit{}, rBrowse{}, rComboAudio{}, rComboSpeed{},
              rComboPrim{}, rComboSec{}, rLaunch{}, rActions[5]{}, rVersion{};
         RECT rStatusDot{}, rStatusText{};
         RECT micro1{}, micro2{}, micro3{}, micro4{}; // field captions in card 2
-        RECT section1{}, section2{}, section3{}, footer{};
+        RECT section1{}, section2{}, section3{}, section4{}, section5{}, footer{};
+        RECT rKeyChip[10]{};                 // hotkey capture chips (2 cols x 5 rows)
+        RECT rStyleCombo{};                  // subtitle style selector
+        RECT rCardChip[5]{};                 // dict-card visibility chips
+        RECT rSaveCfg{}, rResetCfg{};        // persistence controls
     };
 
     static Layout GetLayout() {
@@ -301,6 +321,8 @@ public:
         L.card1 = R(s(20), s(88), s(640), s(114));
         L.card2 = R(s(20), L.card1.bottom + s(14), s(640), s(138));
         L.card3 = R(s(20), L.card2.bottom + s(14), s(640), s(118));
+        L.card4 = R(s(20), L.card3.bottom + s(10), s(640), s(196));
+        L.card5 = R(s(20), L.card4.bottom + s(10), s(640), s(64));
 
         // Card 1 -- game library
         L.rComboGame = R(L.card1.left + s(16), L.card1.top + s(36), s(608), s(26));
@@ -330,9 +352,28 @@ public:
             ax += each + gap;
         }
 
+        // Card 4 -- hotkey remap chips (2 cols x 5 rows)
+        {
+            int cw = s(292), chh = s(26), gx = s(8), gy = s(6);
+            for (int i = 0; i < 10; ++i) {
+                int col = i % 2, row = i / 2;
+                L.rKeyChip[i] = R(L.card4.left + s(16) + col * (cw + gx),
+                                  L.card4.top + s(32) + row * (chh + gy), cw, chh);
+            }
+        }
+
+        // Card 5 -- style + dict card chips + save/reset
+        L.rStyleCombo = R(L.card5.left + s(16), L.card5.top + s(28), s(180), s(26));
+        int cx0 = L.rStyleCombo.right + s(10);
+        for (int i = 0; i < 5; ++i) {
+            L.rCardChip[i] = R(cx0 + i * s(56), L.card5.top + s(28), s(52), s(26));
+        }
+        L.rSaveCfg = R(L.card5.right - s(150), L.card5.top + s(28), s(68), s(26));
+        L.rResetCfg = R(L.rSaveCfg.right + s(8), L.card5.top + s(28), s(66), s(26));
+
         // Status + footer
-        L.rStatusDot = R(s(26), L.card3.bottom + s(24), s(9), s(9));
-        L.rStatusText = R(s(46), L.card3.bottom + s(17), s(560), s(20));
+        L.rStatusDot = R(s(26), L.card5.bottom + s(24), s(9), s(9));
+        L.rStatusText = R(s(46), L.card5.bottom + s(17), s(560), s(20));
         L.footer = R(s(20), L.rStatusText.bottom + s(8), s(640), s(14));
 
         // Header version pill
@@ -341,6 +382,8 @@ public:
         L.section1 = R(L.card1.left + s(16), L.card1.top + s(11), s(300), s(16));
         L.section2 = R(L.card2.left + s(16), L.card2.top + s(8), s(300), s(14));
         L.section3 = R(L.card3.left + s(16), L.card3.top + s(12), s(300), s(16));
+        L.section4 = R(L.card4.left + s(16), L.card4.top + s(8), s(420), s(16));
+        L.section5 = R(L.card5.left + s(16), L.card5.top + s(6), s(420), s(16));
         return L;
     }
 
@@ -361,6 +404,80 @@ public:
             buttons.push_back({ids[i], L.rActions[i], labels[i],
                 ids[i] == ID_BTN_RESTORE_SAVE ? Theme::BtnTeal : Theme::BtnGhost});
         }
+
+        // Hotkey capture chips: label = "Action   [KEY]" or capture hint
+        for (int i = 0; i < 10 && i < static_cast<int>(std::size(DualTitle::DualTitleConfig::kKnownActions)); ++i) {
+            const char* action = DualTitle::DualTitleConfig::kKnownActions[i];
+            std::wstring label;
+            if (capture_action_idx == i) {
+                label = L"Press a key for " + Win32UniversalOverlay::Utf8ToWide(
+                                          DualTitle::DualTitleConfig::ActionLabel(action)) + L"...";
+            } else {
+                const auto* b = DualTitle::DualTitleConfig::FindBinding(cfg, action);
+                std::wstring key = b ? Win32UniversalOverlay::Utf8ToWide(
+                                         DualTitle::DualTitleConfig::NormalizeKey(b->key)) : L"?";
+                std::wstring mods;
+                if (b) {
+                    if (b->ctrl) mods += L"CTRL+";
+                    if (b->alt)  mods += L"ALT+";
+                    if (b->shift) mods += L"SHIFT+";
+                }
+                label = Win32UniversalOverlay::Utf8ToWide(
+                            DualTitle::DualTitleConfig::ActionLabel(action)) + L"   [" + mods + key + L"]";
+            }
+            buttons.push_back({ID_KEY_CHIP0 + i, L.rKeyChip[i], label, Theme::BtnGhost});
+        }
+
+        // Dict-card visibility chips (toggle state from config)
+        const wchar_t* chip_labels[5] = {L"Phon", L"POS", L"Syn", L"Trans", L"Def"};
+        const bool* chip_values[5] = {
+            &cfg.show_card_phonetics, &cfg.show_card_pos, &cfg.show_card_synonyms,
+            &cfg.show_card_translation, &cfg.show_card_definition
+        };
+        for (int i = 0; i < 5; ++i) {
+            buttons.push_back({ID_CHIP_CARD0 + i, L.rCardChip[i], chip_labels[i], Theme::BtnGhost});
+            // Narrow chips: state = label color (green when on, faint when off)
+            buttons.back().text_override = (*chip_values[i]) ? Theme::Accent : Theme::TextFaint;
+        }
+        buttons.push_back({ID_BTN_SAVE_CFG, L.rSaveCfg, L"Save", Theme::BtnPrimary});
+        buttons.push_back({ID_BTN_RESET_CFG, L.rResetCfg, L"Defaults", Theme::BtnGhost});
+    }
+
+    /** Persists settings and reports the target file. */
+    static void SaveConfig(HWND hwnd) {
+        std::string err;
+        if (cfg_path.empty())
+            cfg_path = DualTitle::DualTitleConfig::ResolveConfigPath();
+        if (!DualTitle::DualTitleConfig::Save(cfg_path, cfg, &err)) {
+            SetStatus(hwnd, L"Could not save settings: " +
+                              Win32UniversalOverlay::Utf8ToWide(err), ToneWarn);
+            return;
+        }
+        SetStatus(hwnd, L"Settings saved to " + cfg_path.wstring(), ToneOk);
+    }
+
+    /** The reverse of KeyNameToVk for capture mode. */
+    static std::string KeyNameFromVk(UINT vk) {
+        char buf[8] = {};
+        if (vk >= 'A' && vk <= 'Z') { buf[0] = static_cast<char>(vk); return buf; }
+        if (vk >= '0' && vk <= '9') { buf[0] = static_cast<char>(vk); return buf; }
+        switch (vk) {
+            case VK_ESCAPE: return "ESC"; case VK_SPACE: return "SPACE";
+            case VK_RETURN: return "ENTER"; case VK_TAB: return "TAB";
+            case VK_CAPITAL: return "CAPSLOCK"; case VK_LEFT: return "LEFT";
+            case VK_RIGHT: return "RIGHT"; case VK_UP: return "UP"; case VK_DOWN: return "DOWN";
+            case VK_PRIOR: return "PGUP"; case VK_NEXT: return "PGDN";
+            case VK_HOME: return "HOME"; case VK_END: return "END";
+            case VK_INSERT: return "INSERT"; case VK_DELETE: return "DELETE";
+            case VK_BACK: return "BACKSPACE";
+            case VK_SNAPSHOT: return "PRINTSCREEN"; case VK_SCROLL: return "SCROLLLOCK";
+            default: break;
+        }
+        if (vk >= VK_F1 && vk <= VK_F12) {
+            std::snprintf(buf, sizeof(buf), "F%u", static_cast<unsigned>(vk - VK_F1 + 1));
+            return buf;
+        }
+        return "";
     }
 
     static Theme::FlatBtn* HitButton(const POINT& pt) {
@@ -461,6 +578,46 @@ public:
     static void RunButton(HWND hwnd, int id) {
         BuildButtons();
 
+        // Settings chips (process first so they work even while paths are empty)
+        if (id >= ID_KEY_CHIP0 && id < ID_KEY_CHIP0 + 10) {
+            int idx = id - ID_KEY_CHIP0;
+            capture_action_idx = (capture_action_idx == idx) ? -1 : idx;
+            if (capture_action_idx >= 0) {
+                SetStatus(hwnd, L"Press a key (+optional modifiers) for " +
+                                  Win32UniversalOverlay::Utf8ToWide(
+                                      DualTitle::DualTitleConfig::ActionLabel(
+                                          DualTitle::DualTitleConfig::kKnownActions[idx])) +
+                                  L"  --  ESC cancels.", ToneInfo);
+            } else {
+                SetStatus(hwnd, L"Remap cancelled.", ToneInfo);
+            }
+            InvalidateRect(hwnd, nullptr, TRUE);
+            return;
+        }
+        if (id >= ID_CHIP_CARD0 && id < ID_CHIP_CARD0 + 5) {
+            static bool* targets[5] = {
+                &cfg.show_card_phonetics, &cfg.show_card_pos, &cfg.show_card_synonyms,
+                &cfg.show_card_translation, &cfg.show_card_definition
+            };
+            *targets[id - ID_CHIP_CARD0] = !*targets[id - ID_CHIP_CARD0];
+            InvalidateRect(hwnd, nullptr, TRUE);
+            return;
+        }
+        if (id == ID_BTN_SAVE_CFG) {
+            SaveConfig(hwnd);
+            return;
+        }
+        if (id == ID_BTN_RESET_CFG) {
+            cfg = DualTitle::DualTitleConfig::DefaultConfig();
+            int sel = 0;
+            for (int i = 0; i < 3; ++i)
+                if (cfg.subtitle_style == style_ids[i]) sel = i;
+            SendMessageW(hComboStyle, CB_SETCURSEL, sel, 0);
+            SaveConfig(hwnd);
+            InvalidateRect(hwnd, nullptr, TRUE);
+            return;
+        }
+
         // Read the path as UTF-16 directly so every code page converts cleanly
         int plen = GetWindowTextLengthW(hEditPath);
         std::wstring path_w(static_cast<size_t>(plen) + 1, L'\0');
@@ -516,7 +673,7 @@ public:
         } else if (id == ID_BTN_OVERLAY_ONLY) {
             SetStatus(hwnd, L"Overlay HUD running -- return to your game and press ALT+F8 to hide/show.", ToneInfo);
             ShowWindow(hwnd, SW_MINIMIZE);
-            Win32UniversalOverlay::RunOverlayLoop(gdir, p_lang, s_lang, spd);
+            Win32UniversalOverlay::RunOverlayLoop(gdir, p_lang, s_lang, spd, cfg);
             SetStatus(hwnd, L"Overlay session ended.", ToneInfo);
         } else if (id == ID_BTN_LAUNCH_ALL) {
             std::ostringstream log_ss;
@@ -553,7 +710,7 @@ public:
 
             // 3. Minimize control panel and start the Anti-Cheat-Safe In-Game Overlay HUD
             ShowWindow(hwnd, SW_MINIMIZE);
-            Win32UniversalOverlay::RunOverlayLoop(gdir, p_lang, s_lang, spd);
+            Win32UniversalOverlay::RunOverlayLoop(gdir, p_lang, s_lang, spd, cfg);
             SetStatus(hwnd, L"Overlay session ended.", ToneInfo);
         }
     }
@@ -628,6 +785,7 @@ public:
                 cover_combo_button(L.rComboSpeed, 1303);
                 cover_combo_button(L.rComboPrim, 1304);
                 cover_combo_button(L.rComboSec, 1305);
+                cover_combo_button(L.rStyleCombo, 1306);
 
                 // Populate language + speed selectors
                 const auto& langs = GetSupportedLanguages();
@@ -662,6 +820,18 @@ public:
                 SendMessageW(hComboGame, CB_ADDSTRING, 0,
                     reinterpret_cast<LPARAM>(L"Scanning installed games (C: - Z:)..."));
                 SendMessageW(hComboGame, CB_SETCURSEL, 0, 0);
+
+                // Subtitle style selector (Hotkeys & Style card)
+                hComboStyle = make_combo(L.rStyleCombo, reinterpret_cast<HMENU>(
+                    static_cast<INT_PTR>(ID_COMBO_STYLE)));
+                for (const auto& n : style_names) {
+                    SendMessageW(hComboStyle, CB_ADDSTRING, 0,
+                                 reinterpret_cast<LPARAM>(n.c_str()));
+                }
+                int style_sel = 0;
+                for (int i = 0; i < 3; ++i)
+                    if (cfg.subtitle_style == style_ids[i]) style_sel = i;
+                SendMessageW(hComboStyle, CB_SETCURSEL, style_sel, 0);
 
                 // Background game library scan -- UI never freezes
                 std::thread([hwnd]() {
@@ -713,6 +883,73 @@ public:
                     }
                     return 0;
                 }
+                if (id == ID_COMBO_STYLE && code == CBN_SELCHANGE) {
+                    int sel = static_cast<int>(SendMessageW(hComboStyle, CB_GETCURSEL, 0, 0));
+                    if (sel >= 0 && sel < 3) {
+                        cfg.subtitle_style = style_ids[sel];
+                        SetStatus(hwnd, L"Subtitle style set to: " + style_names[sel] +
+                                          L"  (press Save to keep)", ToneInfo);
+                    }
+                    return 0;
+                }
+                return 0;
+            }
+
+            case WM_KEYDOWN: {
+                // Hotkey capture mode: turn the next key into a rebinding
+                if (capture_action_idx < 0) break;
+                UINT vk = static_cast<UINT>(wparam);
+                if (vk == VK_SHIFT || vk == VK_CONTROL || vk == VK_MENU ||
+                    vk == VK_LWIN || vk == VK_RWIN) return 0;      // modifiers wait
+                const char* action =
+                    DualTitle::DualTitleConfig::kKnownActions[capture_action_idx];
+                if (vk == VK_ESCAPE) {                              // cancel
+                    capture_action_idx = -1;
+                    SetStatus(hwnd, L"Remap cancelled.", ToneInfo);
+                    InvalidateRect(hwnd, nullptr, TRUE);
+                    return 0;
+                }
+                std::string key = KeyNameFromVk(vk);
+                if (!key.empty() &&
+                    DualTitle::DualTitleConfig::IsKnownKeyName(
+                        DualTitle::DualTitleConfig::NormalizeKey(key))) {
+                    bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+                    bool alt = (GetKeyState(VK_MENU) & 0x8000) != 0;
+                    bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+                    if (std::string(action) == "reveal_words" && (ctrl || alt || shift)) {
+                        SetStatus(hwnd,
+                            L"Reveal key must be a plain unmodified key (it is polled live).",
+                            ToneWarn);
+                    } else {
+                        // Reject duplicates: same key+mods already mapped elsewhere?
+                        const auto* dupe = static_cast<const DualTitle::DualTitleConfig::HotkeyBinding*>(nullptr);
+                        for (const auto& h : cfg.hotkeys) {
+                            if (h.action == action) continue;
+                            if (DualTitle::DualTitleConfig::NormalizeKey(h.key) ==
+                                    DualTitle::DualTitleConfig::NormalizeKey(key) &&
+                                h.ctrl == ctrl && h.alt == alt && h.shift == shift) {
+                                dupe = &h;
+                                break;
+                            }
+                        }
+                        if (dupe) {
+                            SetStatus(hwnd, L"That combo is already used by " +
+                                              Win32UniversalOverlay::Utf8ToWide(
+                                                  DualTitle::DualTitleConfig::ActionLabel(dupe->action)) +
+                                              L" -- pick another.", ToneWarn);
+                        } else {
+                            DualTitle::DualTitleConfig::SetBinding(cfg,
+                                {action, key, ctrl, alt, shift});
+                            SetStatus(hwnd, L"Remapped: " +
+                                              Win32UniversalOverlay::Utf8ToWide(
+                                                  DualTitle::DualTitleConfig::ActionLabel(action)) +
+                                              L" -> " + Win32UniversalOverlay::Utf8ToWide(key) +
+                                              L"  (press Save)", ToneOk);
+                        }
+                    }
+                }
+                capture_action_idx = -1;
+                InvalidateRect(hwnd, nullptr, TRUE);
                 return 0;
             }
 
@@ -864,7 +1101,7 @@ public:
                 Theme::DrawLabel(hdc, L"Universal Dual Subtitles * Anti-Cheat-Safe Overlay * Dictionary * Save Guard",
                     RECT{s(84), s(48), s(520), s(68)}, fonts.sub, Theme::TextMuted);
                 Theme::RoundRectFill(hdc, L.rVersion, s(10), Theme::GhostFill, 255, Theme::GhostBorder, 220);
-                Theme::DrawLabel(hdc, L"v5.0", L.rVersion, fonts.section, Theme::Accent, 1,
+                Theme::DrawLabel(hdc, L"v5.1", L.rVersion, fonts.section, Theme::Accent, 1,
                                  DT_CENTER | DT_SINGLELINE | DT_VCENTER);
 
                 // --- Card 1: GAME LIBRARY
@@ -895,6 +1132,22 @@ public:
                 // --- Card 3: ACTIONS
                 Theme::RoundRectFill(hdc, L.card3, s(10), Theme::Card, 255, Theme::CardBorder, 230);
                 Theme::DrawLabel(hdc, L"ACTIONS", L.section3, fonts.section, Theme::TextFaint, 2);
+
+                // --- Card 4: HOTKEYS (click a chip, then press the new key)
+                Theme::RoundRectFill(hdc, L.card4, s(10), Theme::Card, 255, Theme::CardBorder, 230);
+                Theme::DrawLabel(hdc, L"HOTKEYS -- CLICK A CHIP, THEN PRESS THE NEW KEY",
+                    L.section4, fonts.section, Theme::TextMuted, 2);
+
+                // Style combo ring
+                Theme::RoundRectFill(hdc,
+                    RECT{L.rStyleCombo.left, L.rStyleCombo.top - 1, L.rStyleCombo.right + 1, L.rStyleCombo.bottom + 1},
+                    s(6), Theme::Inner, 255, Theme::CardBorder, 255);
+
+                // --- Card 5: SUBTITLE STYLE & DICT CARD
+                Theme::RoundRectFill(hdc, L.card5, s(10), Theme::Card, 255, Theme::CardBorder, 230);
+                Theme::DrawLabel(hdc, L"SUBTITLE STYLE & DICT CARD",
+                    RECT{L.card5.left + s(16), L.card5.top + s(6), L.card5.right - s(16), L.card5.top + s(24)},
+                    fonts.section, Theme::TextFaint, 1);
 
                 // --- Buttons (region-drawn on top of cards)
                 for (const auto& b : buttons) {
@@ -936,6 +1189,7 @@ public:
     static int RunGui() {
         Theme::EnablePerMonitorDpi();
         Theme::BootGdiplus();
+        cfg = DualTitle::DualTitleConfig::LoadOrCreate(&cfg_path);
         HINSTANCE hInst = GetModuleHandleW(nullptr);
         const wchar_t* clsName = L"DualTitleAuroraGuiWndV5";
 
@@ -961,7 +1215,7 @@ public:
         int sw = GetSystemMetrics(SM_CXSCREEN);
         int sh = GetSystemMetrics(SM_CYSCREEN);
         DWORD style = WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
-        RECT wr{0, 0, Theme::S(680, screen_dpi), Theme::S(590, screen_dpi)};
+        RECT wr{0, 0, Theme::S(680, screen_dpi), Theme::S(775, screen_dpi)};
         AdjustWindowRect(&wr, style, FALSE);
         int w = wr.right - wr.left;
         int h = wr.bottom - wr.top;
