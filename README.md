@@ -1,11 +1,11 @@
-# DualTitle v5.0.0 "Aurora" (C++17 & Rust Anti-Cheat-Safe Universal Edition)
+# DualTitle v5.1.0 "Aurora" (C++17 Anti-Cheat-Safe Universal Edition)
 
 <div align="center">
   <img src="assets/logo.png" alt="DualTitle Logo" width="120" />
   <p><strong>Modern-Minimal Dual-Subtitle Overlay HUD • Game Library Picker • Save Restoration</strong></p>
   <p>
-    <a href="https://github.com/ybreakless/dualtitle/releases/download/v4.1.0/DualTitle.exe">⬇️ Download DualTitle.exe</a> •
-    <a href="https://github.com/ybreakless/dualtitle/releases/download/v4.1.0/RestoreSave.exe">💾 RestoreSave.exe</a> •
+    <a href="https://github.com/ybreakless/dualtitle/releases/download/v5.1.0/DualTitle.exe">⬇️ Download DualTitle.exe</a> •
+    <a href="https://github.com/ybreakless/dualtitle/releases/download/v5.1.0/RestoreSave.exe">💾 RestoreSave.exe</a> •
     <a href="https://ybreakless.github.io/dualtitle/">🌐 Website</a> •
     <a href="#-project-structure">📁 Project Layout</a>
   </p>
@@ -41,13 +41,13 @@
 
 ## 📥 Downloads (Windows 10 / 11, 64-Bit)
 
-Grab any file below — every link goes to the official **[v4.1.0 Release](https://github.com/ybreakless/dualtitle/releases/tag/v4.1.0)**:
+Grab any file below — every link goes to the official **[v5.1.0 Release](https://github.com/ybreakless/dualtitle/releases/tag/v5.1.0)**:
 
 | File | What it is |
 | :--- | :--- |
-| **[DualTitle.exe](https://github.com/ybreakless/dualtitle/releases/download/v4.1.0/DualTitle.exe)** | Main launcher (PE32+ GUI, x86_64) — the Control Panel & Game Picker with the embedded DualTitle icon |
-| **[RestoreSave.exe](https://github.com/ybreakless/dualtitle/releases/download/v4.1.0/RestoreSave.exe)** | Standalone 1-click save & profile recovery tool |
-| **[DualTitle-Windows-x64.zip](https://github.com/ybreakless/dualtitle/releases/download/v4.1.0/DualTitle-Windows-x64.zip)** | Complete portable suite (launchers, sources, assets, offline lexicons) |
+| **[DualTitle.exe](https://github.com/ybreakless/dualtitle/releases/download/v5.1.0/DualTitle.exe)** | Main launcher (PE32+ GUI, x86_64) — the Control Panel & Game Picker with the embedded DualTitle icon |
+| **[RestoreSave.exe](https://github.com/ybreakless/dualtitle/releases/download/v5.1.0/RestoreSave.exe)** | Standalone 1-click save & profile recovery tool |
+| **[DualTitle-Windows-x64.zip](https://github.com/ybreakless/dualtitle/releases/download/v5.1.0/DualTitle-Windows-x64.zip)** | Complete portable suite (launchers, sources, assets, offline lexicons) |
 
 Prefer portable copies? All three files are also mirrored in [`docs/downloads/`](docs/downloads/).
 
@@ -59,11 +59,18 @@ Prefer portable copies? All three files are also mirrored in [`docs/downloads/`]
    Double-click `DualTitle.exe` (or `DualTitle.bat`). DualTitle scans every drive (`C:`–`Z:`) in the background and lists installed games automatically — no lag.
    💡 Run `install_dualtitle.bat` once to copy the suite to `%LocalAppData%\Programs\DualTitle` and register a Start-Menu + Desktop shortcut — then `DualTitle` is searchable from the Windows Start Menu.
 
-2. **Pick a Game + Subtitle Style**
+2. **Pick a Game + Subtitle Style + Hotkeys**
    Choose your game from the dropdown, then pick your **Spoken Audio**, **Primary (top) subtitle**, **Secondary (bottom) subtitle**, and **subtitle speed**.
+   Open **Hotkeys & Style** to:
+   - Set the **Reveal Words** hold key (default `CAPSLOCK`, must be unmodified)
+   - Remap any of the 10 actions (click a chip, press the new key + optional modifiers)
+   - Choose a **Subtitle Style**: Aurora / Mimic Frostbite / Classic Console
+   - Toggle which dictionary card fields show (Phonetics / POS / Synonyms / Translation / Definition)
 
 3. **Launch & Enjoy**
    Click **Launch Game + Overlay HUD** — you get live dual subtitles, a clickable word dictionary, and save protection while you play.
+   In game: **HOLD the Reveal key** and hover any subtitle word for its dictionary card.
+   **⚠️ Requires the game to run in borderless/windowed mode** so the OS cursor reaches the overlay. Exclusive fullscreen keeps the cursor locked to the game — DualTitle cannot override that without hooks (which we refuse to use). Use the **Force Borderless** button (`ALT+F11` default) if needed.
 
 > 💡 No install needed. Everything runs from the folder you downloaded.
 
@@ -97,18 +104,56 @@ Two tilted subtitle bars over the game:
 - **Top line — Primary subtitle** in gold `#FFD700`
 - **Bottom line — Secondary subtitle** in ice-white `#E2E8F0`
 
-**Both lines are clickable** — click any word to instantly see its translation, phonetic pronunciation, part of speech, gender article, and definition right on the HUD.
+**Hold-to-Reveal Word Inspector (v5.1.0):**
+- **HOLD the "Reveal Words" key** (default **CAPSLOCK**, fully remappable) while the HUD is visible.
+- Word hitboxes become live; **dwell ~160 ms** on a word → an async dictionary popup card appears with meaning, phonetics, part-of-speech, gender, synonyms, translation, and definition.
+- Release the key → card closes, overlay returns to click-through.
+- **Zero hooks, zero injection** — cursor polling + `GetKeyState` only.
+- **⚠️ Requires borderless/windowed mode** so the OS cursor reaches the overlay.
+
+**Clickable Words (legacy, still works):** Click any word in either subtitle line to inspect it without holding a key.
 
 In-game control buttons:
 
 | Button | Action |
 | :--- | :--- |
 | `◀ Prev` / `Next ▶` | Step backward / forward through dialogue lines |
-| `▶ Auto:ON/OFF` | Toggle automatic subtitle cadence |
+| `▶ Auto:ON/OFF` → **`▶ Pause Subs` / `▶ Resume Subs`** | Toggle automatic subtitle cadence |
 | `- Spd` / `⚡ 1.00x` / `+ Spd` | Live speed control (`0.25x` – `2.00x`) |
-| `⏸ Game (ESC)` | Safe standard keyboard pause (`ALT+F9`, no process hooks) |
+| `⏸ Game (ESC)` → **`⏸ Pause Game`** | Sends your **mapped pause key** to the game (no process hooks) |
 | `🔲 Borderless` | Convert the active game window to borderless fullscreen (`ALT+F11`) |
 | `💾 Restore Save` | 1-click save & profile restoration right from the HUD |
+
+### 🔥 Fully Remappable Hotkeys (10 Actions, v5.1.0)
+
+| Action | Default | Description |
+| :--- | :--- | :--- |
+| **Pause Game** | `ESC` | Sends your mapped key to the game window (`SendInput`, no process handles) |
+| **Pause Subtitles** | `ALT+F9` | Freezes/resumes subtitle auto-advance cadence (game untouched) |
+| **Next Line** | `ALT+F10` | Advance to next subtitle line |
+| **Previous Line** | `ALT+F7` | Go back one subtitle line |
+| **Show/Hide HUD** | `ALT+F8` | Toggle overlay visibility |
+| **Force Borderless** | `ALT+F11` | Convert exclusive fullscreen → borderless window |
+| **Hold: Reveal Words** | `CAPSLOCK` | **Polled live** (must stay unmodified; modifiers reserved for other hotkeys) |
+| **Speed Down** | `ALT+F5` | Decrease subtitle speed (0.25x steps) |
+| **Speed Up** | `ALT+F6` | Increase subtitle speed (0.25x steps) |
+| **Toggle Dict Card** | `ALT+D` | Manually open/close the dictionary popup |
+
+All bindings persist to `data/config.json` (portable) or `%LOCALAPPDATA%\DualTitle\config.json` (fallback). Remap in the Control Panel → **Hotkeys & Style** card: click a chip, press the new key (+ optional Ctrl/Alt/Shift), ESC cancels, duplicates rejected.
+
+### 🎨 Subtitle Style Presets (v5.1.0)
+
+| Preset | Visual | Use Case |
+| :--- | :--- | :--- |
+| **Aurora** (default) | Charcoal rounded card, gold primary / ice-white secondary, subtle glow | DualTitle signature |
+| **Mimic Frostbite** | Flat near-black band, sharp corners, white/gray game-like subs | Battlefield / Apex / Need for Speed vibe |
+| **Classic Console** | Deep black phosphor slab, green primary / amber secondary, thin border | Retro terminal aesthetic |
+
+Selected in the GUI **Hotkeys & Style** card or by editing `subtitle_style` in `config.json`.
+
+### 📚 Dictionary Card Visibility Toggles (v5.1.0)
+
+Per-field chips: **Phonetics / POS / Synonyms / Translation / Definition** — trim the popup to exactly what you need. State persists in config.
 
 ### 💾 Automatic Save Backup & 1-Click "Restore Save"
 
@@ -157,7 +202,7 @@ This runs the full automated verification suite:
 
 ```text
 dualtitle/
-├── DualTitle.exe               # Main launcher (Windows x64, v5.0.0 metadata)
+├── DualTitle.exe               # Main launcher (Windows x64, v5.1.0 metadata)
 ├── RestoreSave.exe             # 1-click save & profile recovery
 ├── DualTitle.bat               # GUI launcher shortcut
 ├── RESTORE_SAVE.bat            # Standalone restore shortcut
@@ -166,6 +211,7 @@ dualtitle/
 ├── install_dualtitle.bat       # Install to LocalAppData + Start-Menu shortcuts (searchable)
 ├── PUBLISH_TO_GITHUB.bat       # Repo bootstrap helper
 ├── RELEASE_NOTES_v4.1.0.md     # Historical release notes (v4.1.0)
+├── RELEASE_NOTES_v5.1.0.md     # Release notes (v5.1.0)
 │
 ├── docs/                       # GitHub Pages website (+ downloads mirror)
 │   ├── index.html
@@ -179,6 +225,8 @@ dualtitle/
 ├── src/                        # C++17 & Rust source
 │   ├── DualTitle.cpp           # Win32 "Aurora" GUI + game picker
 │   ├── DualTitleEngine.hpp     # Engine internals
+│   ├── DualTitleConfig.hpp     # Portable config + hotkey remap schema
+│   ├── DualTitleDictService.hpp # Background async dictionary worker
 │   ├── DualTitleTheme.hpp      # "Aurora" modern-minimal design system
 │   ├── DualTitleOverlay.hpp    # Topmost overlay HUD (Win32)
 │   ├── DualTitle.rc            # Icon + version + manifest resources
@@ -196,7 +244,7 @@ dualtitle/
 ├── CMakeLists.txt              # CMake build definition
 ├── Cargo.toml                  # Rust build definition
 │
-├── data/                       # Language data (de_en.json, en_de.json)
+├── data/                       # Language data (de_en.json, en_de.json) + config.json (runtime)
 └── dictionaries/               # Offline Oxford / Duden / Wiktionary caches
 ```
 
@@ -209,7 +257,7 @@ The pre-built launchers (`DualTitle.exe`, `RestoreSave.exe`) are included, but y
 | Target | How |
 | :--- | :--- |
 | Native C++17 GUI + overlay | Double-click `build_cpp.bat` — auto-locates VS 2022 via `vswhere`, compiles `DualTitle.exe` and runs the self-test suite |
-| Manual MSVC | `rc /nologo /fo src\DualTitle.res src\DualTitle.rc` then `cl /std:c++17 /O2 /EHsc /utf-8 /Fe:DualTitle.exe src\DualTitle.cpp src\DualTitle.res` |
+| Manual MSVC | `rc /nologo /fo src\DualTitle.res src\DualTitle.rc` then `cl /std:c++17 /O2 /EHsc /utf-8 /Fe:DualTitle.exe src\DualTitle.cpp src\DualTitle.res user32.lib gdi32.lib shell32.lib comdlg32.lib gdiplus.lib uxtheme.lib winmm.lib` |
 | CMake | `cmake -S . -B build && cmake --build build --config Release` |
 | Rust entry point | `cargo build --release` |
 | Run verification suite | `python universal_dualsub.py --self-test` |
@@ -226,5 +274,5 @@ The pre-built launchers (`DualTitle.exe`, `RestoreSave.exe`) are included, but y
 ---
 
 <div align="center">
-  <sub><strong>DualTitle v5.0.0 "Aurora"</strong> — Universal Anti-Cheat-Safe Edition (Windows x64)</sub>
+  <sub><strong>DualTitle v5.1.0 "Aurora"</strong> — Universal Anti-Cheat-Safe Edition (Windows x64)</sub>
 </div>
