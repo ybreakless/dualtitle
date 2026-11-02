@@ -21,6 +21,7 @@
  */
 
 #include "DualTitleEngine.hpp"
+#include "DualTitleConfig.hpp"
 #include "DualTitleTheme.hpp"
 #include "DualTitleOverlay.hpp"
 #include <cassert>
@@ -1126,9 +1127,38 @@ static int RunCppSelfTests() {
     assert(d_entry.translation.find("Fledermaeuse") != std::string::npos);
     std::cout << "             PASS: SRT dual-subtitle merger and Famous Dictionary verified.\n";
 
+    // Test 6: Config persistence + hotkey roundtrip (remap subsystem)
+    std::cout << "  [Test 6/6] Testing Config persistence + hotkey remapping...\n";
+    {
+        DualTitle::DualTitleConfig::AppConfig a = DualTitle::DualTitleConfig::DefaultConfig();
+        a.subtitle_style = "mimic_frostbite";
+        a.playback_speed = 1.25;
+        a.show_card_synonyms = true;
+        DualTitle::DualTitleConfig::SetBinding(a, {"pause_game", "P", true, false, false});
+        fs::path cfg = tmp / "config.json";
+        std::string cerr;
+        assert(DualTitle::DualTitleConfig::Save(cfg, a, &cerr));
+        DualTitle::DualTitleConfig::AppConfig b;
+        std::string lerr;
+        assert(DualTitle::DualTitleConfig::Load(cfg, b, &lerr));
+        assert(b.subtitle_style == "mimic_frostbite");
+        assert(b.playback_speed == 1.25);
+        auto* pb = DualTitle::DualTitleConfig::FindBinding(b, "pause_game");
+        assert(pb && pb->key == "P" && pb->ctrl);
+        // Defaults survive invalid documents
+        DualTitle::DualTitleConfig::AppConfig d;
+        std::string perr;
+        DualTitle::DualTitleConfig::Parse("{ not json", d, &perr);
+        assert(!perr.empty());
+        auto* rw = DualTitle::DualTitleConfig::FindBinding(d, "reveal_words");
+        assert(rw && rw->key == "CAPSLOCK");
+        fs::remove(cfg, ec);
+    }
+    std::cout << "             PASS: config.json roundtrip + remap defaults verified.\n";
+
     fs::remove_all(tmp, ec);
     std::cout << "========================================================================\n"
-              << "  ALL 5 C++17 CORE VERIFICATION SUITES PASSED SUCCESSFULLY!\n"
+              << "  ALL 6 C++17 CORE VERIFICATION SUITES PASSED SUCCESSFULLY!\n"
               << "========================================================================\n";
     return 0;
 }
